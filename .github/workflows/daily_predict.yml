@@ -26,14 +26,12 @@ jobs:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
-        run: |
-          cd nifty_predictor
-          python -m scripts.daily_predict --email
+        run: python -m scripts.daily_predict --email
 
       - name: Commit updated DB and signals
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add nifty_predictor/storage/
+          git add storage/
           git diff --staged --quiet || git commit -m "chore: daily prediction $(date -u +%Y-%m-%d)"
           git push
