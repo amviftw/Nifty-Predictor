@@ -1,10 +1,4 @@
 .env
-storage/nifty_predictor.db
-storage/models/
 storage/logs/
-storage/signals/
 __pycache__/
 *.pyc
-"storage/logs/" 
-"__pycache__/" 
-"*.pyc" 
