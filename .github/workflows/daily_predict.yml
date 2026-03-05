@@ -2,12 +2,12 @@ name: Daily Nifty Prediction
 
 on:
   schedule:
-    - cron: '35 3 * * 1-5'   # 9:05 AM IST (UTC+5:30), Mon–Fri
+    - cron: '35 3 * * 1-5'   # 9:35 AM IST (UTC+5:30), Mon–Fri
   workflow_dispatch:           # allows manual trigger
 
 jobs:
   predict:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     permissions:
       contents: write
 
