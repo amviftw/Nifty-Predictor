@@ -7,7 +7,7 @@ on:
 
 jobs:
   predict:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     permissions:
       contents: write
 
