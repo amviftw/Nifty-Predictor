@@ -1,0 +1,517 @@
+{
+  "date": "2026-03-31",
+  "generated_at": "2026-03-31",
+  "total_stocks": 49,
+  "buy_signals": 1,
+  "sell_signals": 2,
+  "signals": [
+    {
+      "signal": "BUY",
+      "confidence": 0.5166,
+      "strength": "MODERATE",
+      "prob_up": 0.5166,
+      "prob_flat": 0.2402,
+      "prob_down": 0.2432,
+      "symbol": "ADANIENT",
+      "sector": "Conglomerate",
+      "position_size_pct": 0.03,
+      "reasons": [
+        "Diversified conglomerates offer broad exposure to India's multi-sector growth story \u2014 from new energy and retail to telecom and financial services. Reliance-type holding structures historically re-rate when multiple business lines hit an inflection simultaneously.",
+        "Earnings have grown 9630% year-on-year, suggesting the company is in a sustained profitability expansion phase.",
+        "Technically: RSI at 29 signals the stock has been oversold \u2014 sellers are exhausted and historically price has mean-reverted strongly from these levels; stock has corrected 23.1% over the past month, creating a meaningful discount to its recent range; price is at the extreme lower end of its volatility range, compounding the oversold signal."
+      ]
+    },
+    {
+      "signal": "SELL",
+      "confidence": 0.4821,
+      "strength": "MODERATE",
+      "prob_up": 0.3304,
+      "prob_flat": 0.1875,
+      "prob_down": 0.4821,
+      "symbol": "BAJAJ-AUTO",
+      "sector": "Auto",
+      "position_size_pct": 0.03,
+      "reasons": [
+        "Auto sector vulnerable to inventory build-up at the dealer level and softening urban demand. Rising input costs (steel, aluminium) and potential fuel price hikes could squeeze margins over the near term.",
+        "Trades at a significant premium to sector peers on P/E with earnings momentum slowing \u2014 a re-rating lower looks increasingly likely.",
+        "Technically: RSI at 39 has slipped below the 50 midline, signalling the trend has shifted from buyers to sellers; MACD histogram has crossed into negative territory, confirming momentum has rolled over."
+      ]
+    },
+    {
+      "signal": "SELL",
+      "confidence": 0.4505,
+      "strength": "MODERATE",
+      "prob_up": 0.2726,
+      "prob_flat": 0.2769,
+      "prob_down": 0.4505,
+      "symbol": "WIPRO",
+      "sector": "IT",
+      "position_size_pct": 0.03,
+      "reasons": [
+        "IT sector facing near-term pressure from client spending caution and project ramp-down risks. A strengthening rupee could compress USD-denominated margins in the current quarter.",
+        "Trades at a significant premium to sector peers on P/E with earnings momentum slowing \u2014 a re-rating lower looks increasingly likely.",
+        "Technically: RSI at 32 has slipped below the 50 midline, signalling the trend has shifted from buyers to sellers."
+      ]
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.5394,
+      "strength": "WEAK",
+      "prob_up": 0.2125,
+      "prob_flat": 0.5394,
+      "prob_down": 0.2481,
+      "symbol": "RELIANCE",
+      "sector": "Conglomerate"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.4722,
+      "strength": "WEAK",
+      "prob_up": 0.1877,
+      "prob_flat": 0.4722,
+      "prob_down": 0.3401,
+      "symbol": "ONGC",
+      "sector": "Oil & Gas"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.4537,
+      "strength": "WEAK",
+      "prob_up": 0.2066,
+      "prob_flat": 0.4537,
+      "prob_down": 0.3397,
+      "symbol": "BHARTIARTL",
+      "sector": "Telecom"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.4536,
+      "strength": "WEAK",
+      "prob_up": 0.2797,
+      "prob_flat": 0.4536,
+      "prob_down": 0.2667,
+      "symbol": "TCS",
+      "sector": "IT"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.4463,
+      "strength": "WEAK",
+      "prob_up": 0.2888,
+      "prob_flat": 0.4463,
+      "prob_down": 0.2649,
+      "symbol": "TITAN",
+      "sector": "Consumer Goods"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.4449,
+      "strength": "WEAK",
+      "prob_up": 0.2846,
+      "prob_flat": 0.4449,
+      "prob_down": 0.2705,
+      "symbol": "BPCL",
+      "sector": "Oil & Gas"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.4422,
+      "strength": "WEAK",
+      "prob_up": 0.2472,
+      "prob_flat": 0.4422,
+      "prob_down": 0.3106,
+      "symbol": "NESTLEIND",
+      "sector": "FMCG"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.4376,
+      "strength": "WEAK",
+      "prob_up": 0.2546,
+      "prob_flat": 0.4376,
+      "prob_down": 0.3078,
+      "symbol": "ICICIBANK",
+      "sector": "Banking"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.4329,
+      "strength": "WEAK",
+      "prob_up": 0.2874,
+      "prob_flat": 0.4329,
+      "prob_down": 0.2797,
+      "symbol": "LT",
+      "sector": "Infrastructure"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.4233,
+      "strength": "WEAK",
+      "prob_up": 0.2108,
+      "prob_flat": 0.4233,
+      "prob_down": 0.3659,
+      "symbol": "ITC",
+      "sector": "FMCG"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3977,
+      "strength": "WEAK",
+      "prob_up": 0.24,
+      "prob_flat": 0.3977,
+      "prob_down": 0.3622,
+      "symbol": "SUNPHARMA",
+      "sector": "Pharma"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3957,
+      "strength": "WEAK",
+      "prob_up": 0.2505,
+      "prob_flat": 0.3957,
+      "prob_down": 0.3538,
+      "symbol": "APOLLOHOSP",
+      "sector": "Healthcare"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3931,
+      "strength": "WEAK",
+      "prob_up": 0.2627,
+      "prob_flat": 0.3931,
+      "prob_down": 0.3442,
+      "symbol": "ULTRACEMCO",
+      "sector": "Cement"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3881,
+      "strength": "WEAK",
+      "prob_up": 0.2836,
+      "prob_flat": 0.3881,
+      "prob_down": 0.3283,
+      "symbol": "TATASTEEL",
+      "sector": "Metals"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3812,
+      "strength": "WEAK",
+      "prob_up": 0.2887,
+      "prob_flat": 0.3812,
+      "prob_down": 0.3301,
+      "symbol": "ASIANPAINT",
+      "sector": "Consumer Goods"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3753,
+      "strength": "WEAK",
+      "prob_up": 0.349,
+      "prob_flat": 0.3753,
+      "prob_down": 0.2757,
+      "symbol": "SBILIFE",
+      "sector": "Insurance"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3746,
+      "strength": "WEAK",
+      "prob_up": 0.3143,
+      "prob_flat": 0.3746,
+      "prob_down": 0.3111,
+      "symbol": "BRITANNIA",
+      "sector": "FMCG"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3713,
+      "strength": "WEAK",
+      "prob_up": 0.329,
+      "prob_flat": 0.3713,
+      "prob_down": 0.2997,
+      "symbol": "HINDUNILVR",
+      "sector": "FMCG"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3594,
+      "strength": "WEAK",
+      "prob_up": 0.3078,
+      "prob_flat": 0.3594,
+      "prob_down": 0.3328,
+      "symbol": "TATACONSUM",
+      "sector": "FMCG"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3567,
+      "strength": "WEAK",
+      "prob_up": 0.2877,
+      "prob_flat": 0.3567,
+      "prob_down": 0.3556,
+      "symbol": "DIVISLAB",
+      "sector": "Pharma"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3443,
+      "strength": "WEAK",
+      "prob_up": 0.3798,
+      "prob_flat": 0.3443,
+      "prob_down": 0.2759,
+      "symbol": "AXISBANK",
+      "sector": "Banking"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3411,
+      "strength": "WEAK",
+      "prob_up": 0.379,
+      "prob_flat": 0.3411,
+      "prob_down": 0.2799,
+      "symbol": "GRASIM",
+      "sector": "Cement"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3404,
+      "strength": "WEAK",
+      "prob_up": 0.3846,
+      "prob_flat": 0.3404,
+      "prob_down": 0.275,
+      "symbol": "SBIN",
+      "sector": "Banking"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3371,
+      "strength": "WEAK",
+      "prob_up": 0.2987,
+      "prob_flat": 0.3371,
+      "prob_down": 0.3642,
+      "symbol": "NTPC",
+      "sector": "Power"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3341,
+      "strength": "WEAK",
+      "prob_up": 0.2732,
+      "prob_flat": 0.3341,
+      "prob_down": 0.3927,
+      "symbol": "INFY",
+      "sector": "IT"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3324,
+      "strength": "WEAK",
+      "prob_up": 0.3954,
+      "prob_flat": 0.3324,
+      "prob_down": 0.2722,
+      "symbol": "UPL",
+      "sector": "Chemicals"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3312,
+      "strength": "WEAK",
+      "prob_up": 0.3027,
+      "prob_flat": 0.3312,
+      "prob_down": 0.3661,
+      "symbol": "POWERGRID",
+      "sector": "Power"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3295,
+      "strength": "WEAK",
+      "prob_up": 0.3227,
+      "prob_flat": 0.3295,
+      "prob_down": 0.3478,
+      "symbol": "JSWSTEEL",
+      "sector": "Metals"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3292,
+      "strength": "WEAK",
+      "prob_up": 0.3706,
+      "prob_flat": 0.3292,
+      "prob_down": 0.3002,
+      "symbol": "HDFCLIFE",
+      "sector": "Insurance"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3176,
+      "strength": "WEAK",
+      "prob_up": 0.3845,
+      "prob_flat": 0.3176,
+      "prob_down": 0.2979,
+      "symbol": "HINDALCO",
+      "sector": "Metals"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3175,
+      "strength": "WEAK",
+      "prob_up": 0.3147,
+      "prob_flat": 0.3175,
+      "prob_down": 0.3678,
+      "symbol": "COALINDIA",
+      "sector": "Mining"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.317,
+      "strength": "WEAK",
+      "prob_up": 0.3406,
+      "prob_flat": 0.317,
+      "prob_down": 0.3425,
+      "symbol": "BAJFINANCE",
+      "sector": "Financial Services"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3157,
+      "strength": "WEAK",
+      "prob_up": 0.3531,
+      "prob_flat": 0.3157,
+      "prob_down": 0.3312,
+      "symbol": "KOTAKBANK",
+      "sector": "Banking"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3148,
+      "strength": "WEAK",
+      "prob_up": 0.2581,
+      "prob_flat": 0.3148,
+      "prob_down": 0.4271,
+      "symbol": "TECHM",
+      "sector": "IT"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3139,
+      "strength": "WEAK",
+      "prob_up": 0.2536,
+      "prob_flat": 0.3139,
+      "prob_down": 0.4324,
+      "symbol": "HCLTECH",
+      "sector": "IT"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3121,
+      "strength": "WEAK",
+      "prob_up": 0.394,
+      "prob_flat": 0.3121,
+      "prob_down": 0.2939,
+      "symbol": "BAJAJFINSV",
+      "sector": "Financial Services"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3016,
+      "strength": "WEAK",
+      "prob_up": 0.2894,
+      "prob_flat": 0.3016,
+      "prob_down": 0.409,
+      "symbol": "DRREDDY",
+      "sector": "Pharma"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.3013,
+      "strength": "WEAK",
+      "prob_up": 0.3499,
+      "prob_flat": 0.3013,
+      "prob_down": 0.3488,
+      "symbol": "HDFCBANK",
+      "sector": "Banking"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.2978,
+      "strength": "WEAK",
+      "prob_up": 0.3582,
+      "prob_flat": 0.2978,
+      "prob_down": 0.344,
+      "symbol": "MARUTI",
+      "sector": "Auto"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.291,
+      "strength": "WEAK",
+      "prob_up": 0.446,
+      "prob_flat": 0.291,
+      "prob_down": 0.263,
+      "symbol": "INDUSINDBK",
+      "sector": "Banking"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.287,
+      "strength": "WEAK",
+      "prob_up": 0.336,
+      "prob_flat": 0.287,
+      "prob_down": 0.377,
+      "symbol": "CIPLA",
+      "sector": "Pharma"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.2825,
+      "strength": "WEAK",
+      "prob_up": 0.4214,
+      "prob_flat": 0.2825,
+      "prob_down": 0.2961,
+      "symbol": "M&M",
+      "sector": "Auto"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.2669,
+      "strength": "WEAK",
+      "prob_up": 0.2918,
+      "prob_flat": 0.2669,
+      "prob_down": 0.4413,
+      "symbol": "LTIM",
+      "sector": "IT"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.2564,
+      "strength": "WEAK",
+      "prob_up": 0.338,
+      "prob_flat": 0.2564,
+      "prob_down": 0.4056,
+      "symbol": "ADANIPORTS",
+      "sector": "Infrastructure"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.2205,
+      "strength": "WEAK",
+      "prob_up": 0.4366,
+      "prob_flat": 0.2205,
+      "prob_down": 0.343,
+      "symbol": "EICHERMOT",
+      "sector": "Auto"
+    },
+    {
+      "signal": "HOLD",
+      "confidence": 0.192,
+      "strength": "WEAK",
+      "prob_up": 0.382,
+      "prob_flat": 0.192,
+      "prob_down": 0.4259,
+      "symbol": "HEROMOTOCO",
+      "sector": "Auto"
+    }
+  ]
+}
