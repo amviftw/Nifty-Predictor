@@ -1,0 +1,20 @@
+# Full dependencies for ML prediction system
+# Install with: pip install -r requirements-ml.txt
+-r requirements.txt
+
+# Technical analysis
+ta>=0.11.0
+
+# NLP / Sentiment
+nltk>=3.8.0
+textblob>=0.17.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+lightgbm>=4.0.0
+optuna>=3.5.0
+joblib>=1.3.0
+
+# Output / Display
+rich>=13.0.0
