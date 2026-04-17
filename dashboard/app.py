@@ -30,6 +30,7 @@ from dashboard.components.macro_panel import render_macro_panel
 from dashboard.components.global_factors import render_global_indices, render_supply_chain
 from dashboard.components.sector_deep_dive import render_sector_deep_dive, render_sector_rotation
 from dashboard.components.predictions_panel import render_predictions_panel
+from dashboard.components.target_hunter import render_target_hunter
 
 
 def main():
@@ -47,11 +48,22 @@ def main():
 
         st.divider()
 
+        mode = st.radio(
+            "Mode",
+            ["Market Overview", "Target Hunter"],
+            index=0,
+            help=(
+                "Market Overview: live Nifty 50 + sector + macro snapshot. "
+                "Target Hunter: find stocks with high analyst upside + technical confirmation."
+            ),
+        )
+
         view = st.radio(
             "View",
             ["Daily", "Weekly"],
             index=0,
             help="Daily: Day-over-day changes. Weekly: Week-over-week changes.",
+            disabled=(mode == "Target Hunter"),
         )
 
         st.divider()
@@ -69,7 +81,15 @@ def main():
             "Data refreshes automatically every 5 minutes."
         )
 
-    # --- Load Data ---
+    # --- Target Hunter mode: skip the rest of the dashboard ---
+    if mode == "Target Hunter":
+        snapshot = load_market_snapshot(view="daily")
+        render_header(snapshot)
+        st.divider()
+        render_target_hunter()
+        return
+
+    # --- Market Overview mode ---
     view_key = view.lower()
     snapshot = load_market_snapshot(view=view_key)
 
