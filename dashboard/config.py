@@ -123,3 +123,10 @@ TOP_MOVERS_COUNT = 10
 # Data periods
 PERIOD_DAILY = "5d"
 PERIOD_WEEKLY = "1mo"
+
+# Target Hunter thresholds
+TARGET_HUNTER_MIN_UPSIDE = 0.15          # 15% minimum mean-target upside
+TARGET_HUNTER_MIN_ANALYSTS = 5           # minimum analyst coverage
+TARGET_HUNTER_TECH_SCORE_THRESHOLD = 40  # 0–100; filter weak-momentum names
+ANALYST_CACHE_TTL_SECONDS = 1800         # 30 minutes — analyst data moves slowly
+TARGET_REVISION_WINDOW_DAYS = 90         # how far back to show broker revisions
