@@ -59,15 +59,16 @@ def render_sectoral_heatmap(snapshot: MarketSnapshot):
         df,
         column_config={
             "Index": st.column_config.TextColumn("Sector", width="medium"),
-            "Close": st.column_config.NumberColumn("Close", format="%.0f"),
-            "DoD %": st.column_config.NumberColumn("Day", format="%.2f%%"),
-            "WoW %": st.column_config.NumberColumn("Week", format="%.2f%%"),
-            "1M %": st.column_config.NumberColumn("Month", format="%.2f%%"),
+            "Close": st.column_config.NumberColumn("Close", format="%.0f", width="small"),
+            "DoD %": st.column_config.NumberColumn("Day %", format="%.2f%%", width="small"),
+            "WoW %": st.column_config.NumberColumn("Week %", format="%.2f%%", width="small"),
+            "1M %": st.column_config.NumberColumn("Month %", format="%.2f%%", width="small"),
         },
         use_container_width=True,
         hide_index=True,
+        height=min(38 + 35 * len(df), 500),
     )
 
     if not df.empty:
         chart_data = df.set_index("Index")[[sort_col]].sort_values(sort_col)
-        st.bar_chart(chart_data, horizontal=True, height=max(250, len(df) * 28))
+        st.bar_chart(chart_data, horizontal=True, height=max(250, len(df) * 30))

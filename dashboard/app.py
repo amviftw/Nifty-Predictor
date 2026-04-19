@@ -130,7 +130,7 @@ p, span, label, div { color: #c9cfd9; }
 }
 .stTabs [data-baseweb="tab-highlight"] { display: none !important; }
 
-/* Dataframes — clean borders, no shadow */
+/* Dataframes — clean borders, centered numeric cells */
 [data-testid="stDataFrame"] {
     font-size: 0.82rem;
     border: 1px solid #232834;
@@ -139,6 +139,26 @@ p, span, label, div { color: #c9cfd9; }
 }
 [data-testid="stDataFrame"] div[role="grid"] {
     background: #0f131c !important;
+}
+/* Center-align numeric column cells & headers */
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataFrame"] [role="gridcell"] {
+    display: flex !important;
+    align-items: center !important;
+}
+[data-testid="stDataFrame"] [role="columnheader"] {
+    font-weight: 600 !important;
+    color: #c9cfd9 !important;
+    letter-spacing: 0.02em;
+}
+/* Right-align numeric cells (Streamlit marks them with class containing "right") */
+[data-testid="stDataFrame"] [role="gridcell"][class*="right"] {
+    justify-content: flex-end !important;
+    padding-right: 12px !important;
+}
+[data-testid="stDataFrame"] [role="columnheader"][class*="right"] {
+    justify-content: flex-end !important;
+    padding-right: 12px !important;
 }
 
 /* Sidebar */
