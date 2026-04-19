@@ -19,12 +19,12 @@ NUM_WEEKS = 16
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def _fetch_sector_weekly() -> pd.DataFrame:
-    """Fetch ~6 months of weekly closes for all sectoral indices."""
+    """Fetch ~1 year of weekly pct changes for all sectoral indices."""
     tickers = list(SECTORAL_INDICES.values())
     try:
         data = yf.download(
             " ".join(tickers),
-            period="6mo",
+            period="1y",
             interval="1wk",
             group_by="ticker",
             auto_adjust=True,
@@ -59,7 +59,7 @@ def _fetch_sector_weekly() -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(records)
-    return df.tail(NUM_WEEKS + 1).iloc[1:]  # drop first NaN row from pct_change
+    return df.iloc[1:]  # drop first NaN row from pct_change; keep full year
 
 
 def _momentum_score(series: pd.Series) -> int:
@@ -74,13 +74,16 @@ def render_sector_momentum():
     st.caption(
         f"Last {NUM_WEEKS} weeks. Each block = one week. "
         "Filled = positive week, hollow = negative. "
-        "Sorted by recent 5-week hit rate."
+        "Sorted by recent 5-week hit rate, then 4-week cumulative return."
     )
 
-    df = _fetch_sector_weekly()
-    if df.empty:
+    full_df = _fetch_sector_weekly()
+    if full_df.empty:
         st.info("Sector weekly data unavailable")
         return
+
+    # Last NUM_WEEKS for the grid; full year kept for cum % (1Y)
+    df = full_df.tail(NUM_WEEKS)
 
     sectors = list(df.columns)
     weeks = list(range(1, len(df) + 1))
@@ -90,11 +93,12 @@ def render_sector_momentum():
     for s in sectors:
         col = df[s].dropna()
         score = _momentum_score(col)
-        cum_ret = ((1 + col / 100).prod() - 1) * 100
-        stats[s] = {"score": score, "cum_ret": cum_ret}
+        cum_1y = ((1 + full_df[s].dropna() / 100).prod() - 1) * 100
+        cum_4w = ((1 + col.tail(4) / 100).prod() - 1) * 100
+        stats[s] = {"score": score, "cum_1y": cum_1y, "cum_4w": cum_4w}
 
-    # Sort by momentum score descending, then by cumulative return
-    sorted_sectors = sorted(sectors, key=lambda s: (stats[s]["score"], stats[s]["cum_ret"]), reverse=True)
+    # Sort by momentum score descending, then by 4-week cumulative return
+    sorted_sectors = sorted(sectors, key=lambda s: (stats[s]["score"], stats[s]["cum_4w"]), reverse=True)
 
     # Build the grid as HTML for rich rendering
     week_labels = [f"W{w}" for w in weeks]
@@ -116,13 +120,15 @@ def render_sector_momentum():
             f'<th style="text-align:center; padding:4px 2px; border-bottom:2px solid #333; {style}{weight}">{wl}</th>'
         )
     html_parts.append('<th style="text-align:center; padding:6px 8px; border-bottom:2px solid #333; border-left:2px solid #555;">W{0}+</th>'.format(NUM_WEEKS - 4))
-    html_parts.append('<th style="text-align:right; padding:6px 8px; border-bottom:2px solid #333;">Cum %</th>')
+    html_parts.append('<th style="text-align:right; padding:6px 8px; border-bottom:2px solid #333;">4W Cum %</th>')
+    html_parts.append('<th style="text-align:right; padding:6px 8px; border-bottom:2px solid #333;">1Y Cum %</th>')
     html_parts.append("</tr>")
 
     for sector in sorted_sectors:
         col = df[sector]
         score = stats[sector]["score"]
-        cum = stats[sector]["cum_ret"]
+        cum_4w = stats[sector]["cum_4w"]
+        cum_1y = stats[sector]["cum_1y"]
 
         # Sector name styling based on score
         if score >= 4:
@@ -164,11 +170,18 @@ def render_sector_momentum():
             f'border-left:2px solid #555; font-weight:700;">{score}/5</td>'
         )
 
-        # Cumulative %
-        cum_color = "#4ade80" if cum > 0 else "#f87171"
+        # 4-week cumulative %
+        c4_color = "#4ade80" if cum_4w > 0 else "#f87171"
         html_parts.append(
             f'<td style="text-align:right; padding:6px 8px; border-bottom:1px solid #222; '
-            f'color:{cum_color};">{cum:+.1f}%</td>'
+            f'color:{c4_color}; font-weight:600;">{cum_4w:+.1f}%</td>'
+        )
+
+        # 1-year cumulative %
+        c1_color = "#4ade80" if cum_1y > 0 else "#f87171"
+        html_parts.append(
+            f'<td style="text-align:right; padding:6px 8px; border-bottom:1px solid #222; '
+            f'color:{c1_color};">{cum_1y:+.1f}%</td>'
         )
         html_parts.append("</tr>")
 
