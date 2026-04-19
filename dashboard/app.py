@@ -18,7 +18,7 @@ from dashboard.components.market_overview import render_key_metrics, render_sect
 from dashboard.components.top_movers import render_top_movers
 from dashboard.components.macro_panel import render_macro_panel
 from dashboard.components.global_factors import render_global_indices, render_supply_chain
-from dashboard.components.sector_deep_dive import render_sector_deep_dive, render_sector_rotation
+from dashboard.components.sector_deep_dive import render_sector_deep_dive
 from dashboard.components.predictions_panel import render_predictions_panel
 from dashboard.components.target_hunter import render_target_hunter
 from dashboard.components.ema_chart import render_ema_chart
@@ -436,11 +436,7 @@ def main():
         render_top_movers(snapshot)
 
     with tab_sectors:
-        col_left, col_right = st.columns([3, 2])
-        with col_left:
-            render_sectoral_heatmap(snapshot)
-        with col_right:
-            render_sector_rotation(snapshot)
+        render_sectoral_heatmap(snapshot)
         _spacer()
         render_sector_momentum()
         _spacer()
