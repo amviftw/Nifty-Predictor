@@ -164,29 +164,28 @@ def _render_chips(stocks: list, ext: dict, change_key: str, is_gainer: bool):
                 f'font-size:0.66rem;color:#7a8294;line-height:1.3;">{insight}</div>'
             )
 
-        chips.append(f'''<div style="
-            background:#151922;border:1px solid {border};border-radius:12px;
-            padding:14px 16px;min-width:175px;flex:1 1 175px;max-width:230px;
-            transition:border-color 0.15s ease;
-        ">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-weight:700;font-size:0.85rem;color:#e8ecf1;">{sym}</span>
-                <span style="background:{chg_bg};color:{chg_color};padding:2px 8px;border-radius:4px;
-                    font-weight:600;font-size:0.78rem;">{change:+.2f}%</span>
-            </div>
-            <div style="font-size:0.68rem;color:#7a8294;margin-top:2px;white-space:nowrap;
-                overflow:hidden;text-overflow:ellipsis;">{company}</div>
-            <div style="font-size:1.05rem;font-weight:600;color:#e8ecf1;margin-top:6px;">
-                &#8377;{close:,.2f}</div>
-            <div style="display:flex;gap:14px;margin-top:8px;font-size:0.72rem;">
-                {ath_html}{vol_html}{rsi_html}
-            </div>
-            <div style="margin-top:8px;">
-                <span style="font-size:0.62rem;background:#232834;padding:2px 6px;
-                    border-radius:3px;color:#7a8294;">{sector}</span>
-            </div>
-            {insight_html}
-        </div>''')
+        chip = (
+            f'<div style="background:#151922;border:1px solid {border};border-radius:12px;'
+            f'padding:14px 16px;min-width:175px;flex:1 1 175px;max-width:230px;'
+            f'transition:border-color 0.15s ease;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            f'<span style="font-weight:700;font-size:0.85rem;color:#e8ecf1;">{sym}</span>'
+            f'<span style="background:{chg_bg};color:{chg_color};padding:2px 8px;'
+            f'border-radius:4px;font-weight:600;font-size:0.78rem;">{change:+.2f}%</span>'
+            f'</div>'
+            f'<div style="font-size:0.68rem;color:#7a8294;margin-top:2px;white-space:nowrap;'
+            f'overflow:hidden;text-overflow:ellipsis;">{company}</div>'
+            f'<div style="font-size:1.05rem;font-weight:600;color:#e8ecf1;margin-top:6px;">'
+            f'&#8377;{close:,.2f}</div>'
+            f'<div style="display:flex;gap:14px;margin-top:8px;font-size:0.72rem;">'
+            f'{ath_html}{vol_html}{rsi_html}'
+            f'</div>'
+            f'<div style="margin-top:8px;"><span style="font-size:0.62rem;background:#232834;'
+            f'padding:2px 6px;border-radius:3px;color:#7a8294;">{sector}</span></div>'
+            f'{insight_html}'
+            f'</div>'
+        )
+        chips.append(chip)
 
     st.markdown(
         '<style>.chip-sub{font-size:0.62rem;color:#7a8294;text-transform:uppercase;'
