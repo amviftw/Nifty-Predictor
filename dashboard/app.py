@@ -346,21 +346,6 @@ def main():
             unsafe_allow_html=True,
         )
 
-        st.markdown(
-            '<div style="font-size:0.72rem; color:#7a8294; text-transform:uppercase; '
-            'letter-spacing:0.08em; margin-top:16px; margin-bottom:4px;">Timeframe</div>',
-            unsafe_allow_html=True,
-        )
-        view = st.radio(
-            "View",
-            ["Daily", "Weekly"],
-            index=0,
-            label_visibility="collapsed",
-            help="Daily: Day-over-day changes. Weekly: Week-over-week changes.",
-        )
-
-        st.markdown('<div style="margin-top:20px;"></div>', unsafe_allow_html=True)
-
         if st.button("Refresh data", use_container_width=True, type="primary"):
             st.cache_data.clear()
             st.rerun()
@@ -372,27 +357,55 @@ def main():
             "Free sources, no API keys. Auto-refreshes every 5 min."
         )
 
-    # --- Mode toggle (top of page, pill-style) ---
-    st.markdown('<div class="mode-toggle-wrap">', unsafe_allow_html=True)
+    # --- Toggles (top of page, pill-style) ---
+    toggle_left, toggle_right = st.columns([3, 2])
     mode_options = ["Market Overview", "Target Hunter"]
-    if hasattr(st, "segmented_control"):
-        mode = st.segmented_control(
-            "Mode",
-            mode_options,
-            default="Market Overview",
-            label_visibility="collapsed",
-            key="mode_toggle",
-        ) or "Market Overview"
-    else:
-        mode = st.radio(
-            "Mode",
-            mode_options,
-            index=0,
-            horizontal=True,
-            label_visibility="collapsed",
-            key="mode_toggle",
-        )
-    st.markdown('</div>', unsafe_allow_html=True)
+    view_options = ["Daily", "Weekly"]
+
+    with toggle_left:
+        st.markdown('<div class="mode-toggle-wrap">', unsafe_allow_html=True)
+        if hasattr(st, "segmented_control"):
+            mode = st.segmented_control(
+                "Mode",
+                mode_options,
+                default="Market Overview",
+                label_visibility="collapsed",
+                key="mode_toggle",
+            ) or "Market Overview"
+        else:
+            mode = st.radio(
+                "Mode",
+                mode_options,
+                index=0,
+                horizontal=True,
+                label_visibility="collapsed",
+                key="mode_toggle",
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with toggle_right:
+        if mode == "Market Overview":
+            st.markdown('<div class="mode-toggle-wrap" style="text-align:right;">', unsafe_allow_html=True)
+            if hasattr(st, "segmented_control"):
+                view = st.segmented_control(
+                    "Timeframe",
+                    view_options,
+                    default="Daily",
+                    label_visibility="collapsed",
+                    key="view_toggle",
+                ) or "Daily"
+            else:
+                view = st.radio(
+                    "Timeframe",
+                    view_options,
+                    index=0,
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key="view_toggle",
+                )
+            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            view = "Daily"
 
     # --- Target Hunter mode ---
     if mode == "Target Hunter":
