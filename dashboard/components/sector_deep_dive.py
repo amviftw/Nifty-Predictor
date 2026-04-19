@@ -28,10 +28,10 @@ def render_sector_deep_dive(snapshot: MarketSnapshot):
         sector_name = SECTOR_INDEX_TO_SECTOR.get(index_name, index_name)
         change_val = row["DoD %"] if snapshot.view == "daily" else row["WoW %"]
 
-        # Color indicator
-        indicator = ":green_circle:" if change_val > 0 else ":red_circle:" if change_val < 0 else ":white_circle:"
+        # Color indicator (actual emoji — shortcodes don't render in expander titles)
+        indicator = "🟢" if change_val > 0 else "🔴" if change_val < 0 else "⚪"
 
-        with st.expander(f"{indicator} **{index_name}** — {change_val:+.2f}% | Close: {row['Close']:,.0f}"):
+        with st.expander(f"{indicator}  **{index_name}** — {change_val:+.2f}%  |  Close: {row['Close']:,.0f}"):
             c1, c2 = st.columns([2, 1])
 
             with c1:

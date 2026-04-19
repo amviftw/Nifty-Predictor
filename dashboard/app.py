@@ -261,6 +261,66 @@ hr { border-color: #232834 !important; margin: 1rem 0 !important; }
 
 /* Column spacing */
 [data-testid="column"] { padding: 0 0.5rem; }
+
+/* ========== Pill-style Mode toggle (segmented control + horizontal radio) ========== */
+.mode-toggle-wrap { margin-bottom: 14px; }
+
+/* Segmented control (Streamlit ≥1.40) */
+.mode-toggle-wrap [data-testid="stSegmentedControl"] {
+    background: #151922;
+    border: 1px solid #232834;
+    border-radius: 10px;
+    padding: 4px;
+    display: inline-flex;
+}
+.mode-toggle-wrap [data-testid="stSegmentedControl"] button {
+    background: transparent !important;
+    border: none !important;
+    color: #7a8294 !important;
+    font-weight: 500 !important;
+    font-size: 0.88rem !important;
+    padding: 8px 20px !important;
+    border-radius: 7px !important;
+    transition: all 0.15s ease;
+}
+.mode-toggle-wrap [data-testid="stSegmentedControl"] button[aria-pressed="true"],
+.mode-toggle-wrap [data-testid="stSegmentedControl"] button[data-selected="true"] {
+    background: #00d09c !important;
+    color: #0b0e14 !important;
+    font-weight: 600 !important;
+}
+
+/* Fallback: horizontal radio styled as pills */
+.mode-toggle-wrap [data-testid="stRadio"] > div[role="radiogroup"] {
+    flex-direction: row !important;
+    gap: 0 !important;
+    background: #151922;
+    border: 1px solid #232834;
+    border-radius: 10px;
+    padding: 4px;
+    display: inline-flex;
+}
+.mode-toggle-wrap [data-testid="stRadio"] label {
+    margin: 0 !important;
+    padding: 8px 20px !important;
+    border-radius: 7px !important;
+    cursor: pointer;
+    color: #7a8294 !important;
+    font-weight: 500 !important;
+    font-size: 0.88rem !important;
+    transition: all 0.15s ease;
+}
+.mode-toggle-wrap [data-testid="stRadio"] label:hover {
+    color: #c9cfd9 !important;
+}
+.mode-toggle-wrap [data-testid="stRadio"] label:has(input:checked) {
+    background: #00d09c !important;
+    color: #0b0e14 !important;
+    font-weight: 600 !important;
+}
+.mode-toggle-wrap [data-testid="stRadio"] label > div:first-child {
+    display: none !important;  /* hide the actual radio circle */
+}
 </style>
 """
 
@@ -288,22 +348,6 @@ def main():
 
         st.markdown(
             '<div style="font-size:0.72rem; color:#7a8294; text-transform:uppercase; '
-            'letter-spacing:0.08em; margin-top:16px; margin-bottom:4px;">Mode</div>',
-            unsafe_allow_html=True,
-        )
-        mode = st.radio(
-            "Mode",
-            ["Market Overview", "Target Hunter"],
-            index=0,
-            label_visibility="collapsed",
-            help=(
-                "Market Overview: live Nifty 50 + sector + macro snapshot. "
-                "Target Hunter: find stocks with high analyst upside + technical confirmation."
-            ),
-        )
-
-        st.markdown(
-            '<div style="font-size:0.72rem; color:#7a8294; text-transform:uppercase; '
             'letter-spacing:0.08em; margin-top:16px; margin-bottom:4px;">Timeframe</div>',
             unsafe_allow_html=True,
         )
@@ -313,7 +357,6 @@ def main():
             index=0,
             label_visibility="collapsed",
             help="Daily: Day-over-day changes. Weekly: Week-over-week changes.",
-            disabled=(mode == "Target Hunter"),
         )
 
         st.markdown('<div style="margin-top:20px;"></div>', unsafe_allow_html=True)
@@ -328,6 +371,28 @@ def main():
             "Data: Yahoo Finance, NSE India. "
             "Free sources, no API keys. Auto-refreshes every 5 min."
         )
+
+    # --- Mode toggle (top of page, pill-style) ---
+    st.markdown('<div class="mode-toggle-wrap">', unsafe_allow_html=True)
+    mode_options = ["Market Overview", "Target Hunter"]
+    if hasattr(st, "segmented_control"):
+        mode = st.segmented_control(
+            "Mode",
+            mode_options,
+            default="Market Overview",
+            label_visibility="collapsed",
+            key="mode_toggle",
+        ) or "Market Overview"
+    else:
+        mode = st.radio(
+            "Mode",
+            mode_options,
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="mode_toggle",
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Target Hunter mode ---
     if mode == "Target Hunter":
