@@ -26,8 +26,9 @@ from dashboard.components.sector_momentum import render_sector_momentum
 
 
 _CUSTOM_CSS = """
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 /* ========== Groww-inspired design system ========== */
 
 html, body, [class*="css"], .stApp {
