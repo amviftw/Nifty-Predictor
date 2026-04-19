@@ -26,57 +26,220 @@ from dashboard.components.sector_momentum import render_sector_momentum
 
 
 _CUSTOM_CSS = """
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-/* Tighter metric cards */
-[data-testid="stMetric"] {
-    background: linear-gradient(135deg, #1e2130 0%, #262a3d 100%);
-    border: 1px solid #333;
-    border-radius: 8px;
-    padding: 12px 16px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-}
-[data-testid="stMetric"] label { font-size: 0.78rem; color: #aaa; }
-[data-testid="stMetricValue"] { font-size: 1.4rem; }
+/* ========== Groww-inspired design system ========== */
 
-/* Tab styling */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 4px;
-    background: #161825;
-    border-radius: 8px;
-    padding: 4px;
+html, body, [class*="css"], .stApp {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
 }
-.stTabs [data-baseweb="tab"] {
-    border-radius: 6px;
-    padding: 8px 20px;
+
+/* Main page background — deep but not black */
+.stApp { background: #0b0e14; }
+
+/* Typography hierarchy */
+h1 {
+    font-size: 1.5rem !important;
+    font-weight: 700 !important;
+    color: #e8ecf1 !important;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.25rem !important;
+}
+h2 {
+    font-size: 1.15rem !important;
+    font-weight: 600 !important;
+    color: #d8dde5 !important;
+    letter-spacing: -0.01em;
+}
+h3 {
+    font-size: 1.0rem !important;
+    font-weight: 600 !important;
+    color: #d8dde5 !important;
+}
+h4 {
+    font-size: 0.92rem !important;
+    font-weight: 600 !important;
+    color: #c9cfd9 !important;
+    margin-top: 0.5rem !important;
+    margin-bottom: 0.5rem !important;
+    letter-spacing: -0.005em;
+}
+
+p, span, label, div { color: #c9cfd9; }
+
+/* Metric cards — clean, bordered, hover lift */
+[data-testid="stMetric"] {
+    background: #151922;
+    border: 1px solid #232834;
+    border-radius: 10px;
+    padding: 14px 18px;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+[data-testid="stMetric"]:hover {
+    border-color: #2f3645;
+    transform: translateY(-1px);
+}
+[data-testid="stMetric"] label {
+    font-size: 0.68rem !important;
+    color: #7a8294 !important;
+    font-weight: 500 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+[data-testid="stMetricValue"] {
+    font-size: 1.4rem !important;
+    font-weight: 600 !important;
+    color: #e8ecf1 !important;
+    letter-spacing: -0.01em;
+}
+[data-testid="stMetricDelta"] {
+    font-size: 0.8rem !important;
     font-weight: 500;
 }
+
+/* Tabs — Groww-style underline tabs */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0 !important;
+    background: transparent !important;
+    border-bottom: 1px solid #232834 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    margin-bottom: 1rem !important;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    border-radius: 0 !important;
+    padding: 10px 24px !important;
+    font-weight: 500 !important;
+    font-size: 0.9rem !important;
+    color: #7a8294 !important;
+    border-bottom: 2px solid transparent !important;
+    margin: 0 !important;
+    transition: all 0.15s ease;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    color: #c9cfd9 !important;
+    background: transparent !important;
+}
 .stTabs [aria-selected="true"] {
-    background: #1a237e !important;
+    color: #00d09c !important;
+    border-bottom: 2px solid #00d09c !important;
+    background: transparent !important;
+    font-weight: 600 !important;
+}
+.stTabs [data-baseweb="tab-highlight"] { display: none !important; }
+
+/* Dataframes — clean borders, no shadow */
+[data-testid="stDataFrame"] {
+    font-size: 0.82rem;
+    border: 1px solid #232834;
+    border-radius: 8px;
+    overflow: hidden;
+}
+[data-testid="stDataFrame"] div[role="grid"] {
+    background: #0f131c !important;
 }
 
-/* Expander polish */
-.streamlit-expanderHeader { font-size: 0.92rem; }
-
-/* Better dataframe density */
-[data-testid="stDataFrame"] { font-size: 0.85rem; }
-
-/* Sidebar polish */
+/* Sidebar */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0e1117 0%, #131620 100%);
+    background: #0a0d13 !important;
+    border-right: 1px solid #232834;
+}
+section[data-testid="stSidebar"] h1 {
+    font-size: 1.15rem !important;
+    color: #e8ecf1 !important;
+    font-weight: 600 !important;
 }
 section[data-testid="stSidebar"] .stRadio label {
-    font-size: 0.9rem;
+    font-size: 0.88rem !important;
+    color: #c9cfd9 !important;
+}
+section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label {
+    padding: 4px 0;
 }
 
-/* Section header styling */
-.section-header {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #e0e0e0;
-    margin-bottom: 4px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid #333;
+/* Buttons */
+.stButton > button {
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+    font-size: 0.88rem !important;
+    border: 1px solid #232834 !important;
+    background: #151922 !important;
+    color: #e8ecf1 !important;
+    transition: all 0.15s ease;
+    padding: 8px 16px !important;
 }
+.stButton > button:hover {
+    border-color: #00d09c !important;
+    color: #00d09c !important;
+    background: #151922 !important;
+}
+.stButton > button[kind="primary"] {
+    background: #00d09c !important;
+    color: #0b0e14 !important;
+    border: none !important;
+    font-weight: 600 !important;
+}
+.stButton > button[kind="primary"]:hover {
+    background: #00b386 !important;
+    color: #0b0e14 !important;
+}
+
+/* Expanders — clean cards */
+[data-testid="stExpander"] {
+    background: #151922;
+    border: 1px solid #232834 !important;
+    border-radius: 10px !important;
+    margin-bottom: 8px;
+}
+[data-testid="stExpander"] summary {
+    font-size: 0.9rem !important;
+    padding: 10px 14px !important;
+}
+[data-testid="stExpander"] summary:hover {
+    background: #1a1f2b;
+}
+
+/* Dividers — subtle */
+hr { border-color: #232834 !important; margin: 1rem 0 !important; }
+
+/* Captions — muted */
+[data-testid="stCaptionContainer"], .caption, small {
+    color: #6b7587 !important;
+    font-size: 0.78rem !important;
+}
+
+/* Info/Success/Warning alerts */
+[data-testid="stAlert"] {
+    border-radius: 8px !important;
+    border: 1px solid #232834 !important;
+}
+
+/* Progress bar in columns */
+[data-testid="stProgressBar"] > div > div {
+    background: linear-gradient(90deg, #00d09c 0%, #00b386 100%) !important;
+}
+
+/* Radio buttons in sidebar */
+[role="radiogroup"] {
+    gap: 2px !important;
+}
+
+/* Slider */
+[data-testid="stSlider"] [data-baseweb="slider"] [role="slider"] {
+    background: #00d09c !important;
+    border: 2px solid #00d09c !important;
+}
+
+/* Hide Streamlit footer/menu for cleaner look */
+#MainMenu, footer, [data-testid="stToolbar"] { visibility: hidden; }
+
+/* Tighter vertical rhythm */
+.block-container { padding-top: 1.5rem !important; padding-bottom: 2rem !important; }
+.element-container { margin-bottom: 0.5rem; }
+
+/* Column spacing */
+[data-testid="column"] { padding: 0 0.5rem; }
 </style>
 """
 
@@ -93,47 +256,62 @@ def main():
 
     # --- Sidebar ---
     with st.sidebar:
-        st.title("Nifty Market Dashboard")
-        st.caption("Live Indian equity market fundamentals")
+        st.markdown(
+            '<div style="padding:4px 0 12px 0;">'
+            '<div style="font-size:1.15rem; font-weight:700; color:#e8ecf1; letter-spacing:-0.01em;">'
+            '<span style="color:#00d09c;">●</span> Nifty Terminal</div>'
+            '<div style="font-size:0.78rem; color:#7a8294; margin-top:2px;">Indian equity market intelligence</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
-        st.divider()
-
+        st.markdown(
+            '<div style="font-size:0.72rem; color:#7a8294; text-transform:uppercase; '
+            'letter-spacing:0.08em; margin-top:16px; margin-bottom:4px;">Mode</div>',
+            unsafe_allow_html=True,
+        )
         mode = st.radio(
             "Mode",
             ["Market Overview", "Target Hunter"],
             index=0,
+            label_visibility="collapsed",
             help=(
                 "Market Overview: live Nifty 50 + sector + macro snapshot. "
                 "Target Hunter: find stocks with high analyst upside + technical confirmation."
             ),
         )
 
+        st.markdown(
+            '<div style="font-size:0.72rem; color:#7a8294; text-transform:uppercase; '
+            'letter-spacing:0.08em; margin-top:16px; margin-bottom:4px;">Timeframe</div>',
+            unsafe_allow_html=True,
+        )
         view = st.radio(
             "View",
             ["Daily", "Weekly"],
             index=0,
+            label_visibility="collapsed",
             help="Daily: Day-over-day changes. Weekly: Week-over-week changes.",
             disabled=(mode == "Target Hunter"),
         )
 
-        st.divider()
+        st.markdown('<div style="margin-top:20px;"></div>', unsafe_allow_html=True)
 
-        if st.button("🔄 Refresh Data", use_container_width=True, type="primary"):
+        if st.button("Refresh data", use_container_width=True, type="primary"):
             st.cache_data.clear()
             st.rerun()
 
-        st.divider()
+        st.markdown('<div style="margin-top:24px;"></div>', unsafe_allow_html=True)
 
         st.caption(
-            "Data: Yahoo Finance, NSE India, Google News. "
-            "Free — no API keys. Auto-refreshes every 5 min."
+            "Data: Yahoo Finance, NSE India. "
+            "Free sources, no API keys. Auto-refreshes every 5 min."
         )
 
     # --- Target Hunter mode ---
     if mode == "Target Hunter":
         snapshot = load_market_snapshot(view="daily")
         render_header(snapshot)
-        st.divider()
         render_target_hunter()
         return
 
@@ -142,13 +320,10 @@ def main():
     snapshot = load_market_snapshot(view=view_key)
 
     render_header(snapshot)
-
-    # Key metrics bar (always visible)
     render_key_metrics(snapshot)
 
-    st.divider()
+    st.markdown('<div style="margin-top:24px;"></div>', unsafe_allow_html=True)
 
-    # Main content in tabs
     tab_market, tab_sectors, tab_macro, tab_signals = st.tabs([
         "Market",
         "Sectors",
@@ -157,45 +332,35 @@ def main():
     ])
 
     with tab_market:
-        # EMA chart
         render_ema_chart(view=view_key)
-
-        st.divider()
-
-        # Top movers
+        _spacer()
         render_top_movers(snapshot)
 
     with tab_sectors:
         col_left, col_right = st.columns([3, 2])
-
         with col_left:
             render_sectoral_heatmap(snapshot)
-
         with col_right:
             render_sector_rotation(snapshot)
-
-        st.divider()
-
-        # Momentum grid (weekly data — always relevant)
+        _spacer()
         render_sector_momentum()
-
-        st.divider()
-
+        _spacer()
         render_sector_deep_dive(snapshot)
 
     with tab_macro:
         render_macro_panel(snapshot)
-
-        st.divider()
-
+        _spacer()
         render_global_indices(snapshot)
-
-        st.divider()
-
+        _spacer()
         render_supply_chain(snapshot)
 
     with tab_signals:
         render_predictions_panel()
+
+
+def _spacer():
+    """Consistent vertical gap between tab sections."""
+    st.markdown('<div style="margin-top:32px;"></div>', unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

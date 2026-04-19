@@ -37,6 +37,9 @@ def render_predictions_panel():
 
 def _try_ml_predictions() -> bool:
     """Attempt to load ML predictions. Returns True if rendered."""
+    # Skip entirely if no prediction DB exists (e.g. on Streamlit Cloud)
+    if not DB_PATH.exists():
+        return False
     try:
         from data.storage.db_manager import DBManager
         db = DBManager(db_path=str(DB_PATH))
