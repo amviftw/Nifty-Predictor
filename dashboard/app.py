@@ -3,21 +3,11 @@ Indian Stock Market Dashboard — Main Streamlit Application.
 
 Run with:
     streamlit run dashboard/app.py
-
-Provides Daily and Weekly views of:
-- Nifty 50 and sectoral index movements
-- Top gainers and losers
-- Macro indicators (VIX, USD/INR, FII/DII flows)
-- Global indices
-- Supply chain / international factors with sector impact analysis
-- Sector-by-sector deep dive
-- ML predictions (if available from the existing prediction system)
 """
 
 import sys
 import os
 
-# Ensure project root is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
@@ -31,6 +21,64 @@ from dashboard.components.global_factors import render_global_indices, render_su
 from dashboard.components.sector_deep_dive import render_sector_deep_dive, render_sector_rotation
 from dashboard.components.predictions_panel import render_predictions_panel
 from dashboard.components.target_hunter import render_target_hunter
+from dashboard.components.ema_chart import render_ema_chart
+from dashboard.components.sector_momentum import render_sector_momentum
+
+
+_CUSTOM_CSS = """
+<style>
+/* Tighter metric cards */
+[data-testid="stMetric"] {
+    background: linear-gradient(135deg, #1e2130 0%, #262a3d 100%);
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 12px 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+[data-testid="stMetric"] label { font-size: 0.78rem; color: #aaa; }
+[data-testid="stMetricValue"] { font-size: 1.4rem; }
+
+/* Tab styling */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px;
+    background: #161825;
+    border-radius: 8px;
+    padding: 4px;
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: 6px;
+    padding: 8px 20px;
+    font-weight: 500;
+}
+.stTabs [aria-selected="true"] {
+    background: #1a237e !important;
+}
+
+/* Expander polish */
+.streamlit-expanderHeader { font-size: 0.92rem; }
+
+/* Better dataframe density */
+[data-testid="stDataFrame"] { font-size: 0.85rem; }
+
+/* Sidebar polish */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0e1117 0%, #131620 100%);
+}
+section[data-testid="stSidebar"] .stRadio label {
+    font-size: 0.9rem;
+}
+
+/* Section header styling */
+.section-header {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #e0e0e0;
+    margin-bottom: 4px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #333;
+}
+</style>
+"""
 
 
 def main():
@@ -41,10 +89,12 @@ def main():
         initial_sidebar_state="expanded",
     )
 
+    st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
+
     # --- Sidebar ---
     with st.sidebar:
         st.title("Nifty Market Dashboard")
-        st.markdown("Live Indian equity market fundamentals")
+        st.caption("Live Indian equity market fundamentals")
 
         st.divider()
 
@@ -68,20 +118,18 @@ def main():
 
         st.divider()
 
-        if st.button("Refresh Data", use_container_width=True):
+        if st.button("🔄 Refresh Data", use_container_width=True, type="primary"):
             st.cache_data.clear()
             st.rerun()
 
         st.divider()
 
-        st.markdown("**About**")
         st.caption(
-            "Data sourced from Yahoo Finance, NSE India, and Google News. "
-            "All sources are free and require no API keys. "
-            "Data refreshes automatically every 5 minutes."
+            "Data: Yahoo Finance, NSE India, Google News. "
+            "Free — no API keys. Auto-refreshes every 5 min."
         )
 
-    # --- Target Hunter mode: skip the rest of the dashboard ---
+    # --- Target Hunter mode ---
     if mode == "Target Hunter":
         snapshot = load_market_snapshot(view="daily")
         render_header(snapshot)
@@ -93,54 +141,61 @@ def main():
     view_key = view.lower()
     snapshot = load_market_snapshot(view=view_key)
 
-    # --- Main Content ---
-    st.title("Indian Equity Market Dashboard")
     render_header(snapshot)
 
-    st.divider()
-
-    # Row 1: Key Metrics
+    # Key metrics bar (always visible)
     render_key_metrics(snapshot)
 
     st.divider()
 
-    # Row 2: Sectoral Indices
-    render_sectoral_heatmap(snapshot)
+    # Main content in tabs
+    tab_market, tab_sectors, tab_macro, tab_signals = st.tabs([
+        "Market",
+        "Sectors",
+        "Macro & Global",
+        "Signals",
+    ])
 
-    st.divider()
+    with tab_market:
+        # EMA chart
+        render_ema_chart(view=view_key)
 
-    # Row 3: Top Movers
-    render_top_movers(snapshot)
+        st.divider()
 
-    st.divider()
+        # Top movers
+        render_top_movers(snapshot)
 
-    # Row 4: Macro Panel
-    render_macro_panel(snapshot)
+    with tab_sectors:
+        col_left, col_right = st.columns([3, 2])
 
-    st.divider()
+        with col_left:
+            render_sectoral_heatmap(snapshot)
 
-    # Row 5: Global Indices
-    render_global_indices(snapshot)
+        with col_right:
+            render_sector_rotation(snapshot)
 
-    st.divider()
+        st.divider()
 
-    # Row 6: Supply Chain Factors
-    render_supply_chain(snapshot)
+        # Momentum grid (weekly data — always relevant)
+        render_sector_momentum()
 
-    st.divider()
+        st.divider()
 
-    # Row 7: Sector Rotation
-    render_sector_rotation(snapshot)
+        render_sector_deep_dive(snapshot)
 
-    st.divider()
+    with tab_macro:
+        render_macro_panel(snapshot)
 
-    # Row 8: Sector Deep Dive
-    render_sector_deep_dive(snapshot)
+        st.divider()
 
-    st.divider()
+        render_global_indices(snapshot)
 
-    # Row 9: ML Predictions (optional)
-    render_predictions_panel()
+        st.divider()
+
+        render_supply_chain(snapshot)
+
+    with tab_signals:
+        render_predictions_panel()
 
 
 if __name__ == "__main__":

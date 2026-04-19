@@ -9,7 +9,7 @@ from dashboard.config import SECTOR_SUPPLY_CHAIN, SUPPLY_CHAIN_TICKERS
 
 def render_global_indices(snapshot: MarketSnapshot):
     """Render global index metric cards."""
-    st.subheader("Global Indices")
+    st.markdown("#### Global Indices")
 
     if not snapshot.global_indices:
         st.info("Global index data unavailable")
@@ -21,62 +21,54 @@ def render_global_indices(snapshot: MarketSnapshot):
     for col, (name, data) in zip(cols, indices):
         with col:
             ret = data.get("ret_pct", 0)
-            st.metric(name, f"{ret:+.2f}%", delta=None)
+            color = "green" if ret > 0 else "red" if ret < 0 else "grey"
+            st.metric(name, f"{ret:+.2f}%")
 
 
 def render_supply_chain(snapshot: MarketSnapshot):
-    """Render supply chain factors table with sector impact annotations."""
-    st.subheader("Supply Chain & International Factors")
+    """Render supply chain factors with sector impact analysis."""
+    st.markdown("#### Supply Chain & International Factors")
 
     if snapshot.supply_chain.empty:
         st.info("Supply chain data unavailable")
         return
 
-    # Display the data table
     df = snapshot.supply_chain.copy()
-    st.dataframe(
-        df,
-        column_config={
-            "Factor": st.column_config.TextColumn("Factor", width="medium"),
-            "Price": st.column_config.NumberColumn("Price", format="%.2f"),
-            "DoD %": st.column_config.NumberColumn("Day %", format="%.2f%%"),
-            "WoW %": st.column_config.NumberColumn("Week %", format="%.2f%%"),
-        },
-        use_container_width=True,
-        hide_index=True,
-    )
 
-    # Sector impact annotations
-    st.markdown("**Sector Impact Analysis**")
+    c1, c2 = st.columns([3, 2])
 
-    # Build a mapping from factor name to its current movement
-    factor_moves = {}
-    for _, row in df.iterrows():
-        factor_name = row["Factor"]
-        dod = row.get("DoD %", 0)
-        factor_moves[factor_name] = dod
+    with c1:
+        st.dataframe(
+            df,
+            column_config={
+                "Factor": st.column_config.TextColumn("Factor", width="medium"),
+                "Price": st.column_config.NumberColumn("Price", format="%.2f"),
+                "DoD %": st.column_config.NumberColumn("Day", format="%.2f%%"),
+                "WoW %": st.column_config.NumberColumn("Week", format="%.2f%%"),
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
 
-    # For each sector that has supply chain links, show the impact
-    impacted_sectors = []
-    for sector, info in SECTOR_SUPPLY_CHAIN.items():
-        relevant_factors = []
-        for f in info["factors"]:
-            if f in factor_moves:
-                move = factor_moves[f]
-                if abs(move) > 0.5:  # Only show meaningful moves
-                    direction = "up" if move > 0 else "down"
-                    relevant_factors.append(f"{f} {move:+.1f}%")
+    with c2:
+        factor_moves = {}
+        for _, row in df.iterrows():
+            factor_moves[row["Factor"]] = row.get("DoD %", 0)
 
-        if relevant_factors:
-            factors_str = ", ".join(relevant_factors)
-            impacted_sectors.append({
-                "Sector": sector,
-                "Active Factors": factors_str,
-                "Context": info["note"],
-            })
+        impacted = []
+        for sector, info in SECTOR_SUPPLY_CHAIN.items():
+            active = []
+            for f in info["factors"]:
+                if f in factor_moves and abs(factor_moves[f]) > 0.5:
+                    active.append(f"{f} {factor_moves[f]:+.1f}%")
+            if active:
+                impacted.append({
+                    "Sector": sector,
+                    "Movers": ", ".join(active),
+                })
 
-    if impacted_sectors:
-        impact_df = pd.DataFrame(impacted_sectors)
-        st.dataframe(impact_df, use_container_width=True, hide_index=True)
-    else:
-        st.caption("No significant supply chain movements today (>0.5% threshold)")
+        if impacted:
+            st.markdown("**Sector impact**")
+            st.dataframe(pd.DataFrame(impacted), use_container_width=True, hide_index=True)
+        else:
+            st.caption("No significant supply chain moves today (>0.5%)")
