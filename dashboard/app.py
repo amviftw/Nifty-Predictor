@@ -321,6 +321,22 @@ hr { border-color: #232834 !important; margin: 1rem 0 !important; }
 .mode-toggle-wrap [data-testid="stRadio"] label > div:first-child {
     display: none !important;  /* hide the actual radio circle */
 }
+
+/* Top-of-page Refresh button — match pill toggle height/style */
+.refresh-btn-wrap { margin-bottom: 14px; }
+.refresh-btn-wrap .stButton > button {
+    background: #151922 !important;
+    border: 1px solid #232834 !important;
+    color: #c9cfd9 !important;
+    font-weight: 500 !important;
+    padding: 8px 14px !important;
+    border-radius: 10px !important;
+}
+.refresh-btn-wrap .stButton > button:hover {
+    border-color: #00d09c !important;
+    color: #00d09c !important;
+    background: #151922 !important;
+}
 </style>
 """
 
@@ -358,7 +374,7 @@ def main():
         )
 
     # --- Toggles (top of page, pill-style) ---
-    toggle_left, toggle_right = st.columns([3, 2])
+    toggle_left, toggle_mid, toggle_right = st.columns([3, 2, 1])
     mode_options = ["Market Overview", "Target Hunter"]
     view_options = ["Daily", "Weekly"]
 
@@ -374,7 +390,7 @@ def main():
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
-    with toggle_right:
+    with toggle_mid:
         if mode == "Market Overview":
             st.markdown('<div class="mode-toggle-wrap" style="text-align:right;">', unsafe_allow_html=True)
             view = st.radio(
@@ -388,6 +404,13 @@ def main():
             st.markdown('</div>', unsafe_allow_html=True)
         else:
             view = "Daily"
+
+    with toggle_right:
+        st.markdown('<div class="refresh-btn-wrap">', unsafe_allow_html=True)
+        if st.button("↻  Refresh", use_container_width=True, key="refresh_top"):
+            st.cache_data.clear()
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Target Hunter mode ---
     if mode == "Target Hunter":
