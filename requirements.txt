@@ -11,6 +11,7 @@ numpy>=1.24.0
 
 # Dashboard
 streamlit>=1.30.0
+streamlit-lightweight-charts>=0.7.17
 
 # Logging
 loguru>=0.7.0
