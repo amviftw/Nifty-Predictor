@@ -85,9 +85,27 @@ class MarketSnapshot:
     unchanged_count: int = 0
 
 
+def _market_minute_bucket() -> int:
+    """Returns a minute-bucket key during market hours, else hour-bucket.
+
+    Market hours (9:00–16:00 IST on trading days): 1-min buckets so cached
+    snapshots invalidate every minute and chips show fresh prints.
+    Off-hours: hour-bucket so we don't hammer Yahoo when nothing's moving.
+    """
+    now = datetime.now(IST)
+    today = date.today()
+    if is_trading_day(today) and 9 <= now.hour <= 16:
+        return int(now.timestamp() // 60)
+    return int(now.timestamp() // 3600)
+
+
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="Fetching live market data...")
-def load_market_snapshot(view: str = "daily") -> MarketSnapshot:
-    """Master function: fetches all data and returns a MarketSnapshot."""
+def load_market_snapshot(view: str = "daily", _bucket: int = 0) -> MarketSnapshot:
+    """Master function: fetches all data and returns a MarketSnapshot.
+
+    The `_bucket` argument is a cache-key only — pass `_market_minute_bucket()`
+    so the cache rotates every minute during market hours.
+    """
     now = datetime.now(IST)
     today = date.today()
     trading_day = today if is_trading_day(today) else prev_trading_day(today)
@@ -191,65 +209,111 @@ def _populate_stock_data(snapshot: MarketSnapshot, period: str):
 
 
 def _populate_macro_data(snapshot: MarketSnapshot, period: str):
-    """Fetch global indices, VIX, USD/INR, FII/DII."""
+    """Fetch global indices, VIX, USD/INR, FII/DII.
+
+    Critical KPIs (Nifty 50, VIX, USD/INR) are fetched individually for
+    reliability — yfinance batch downloads silently drop Indian indices.
+    Global indices (S&P, NASDAQ, etc.) still use the batch fetcher.
+    """
+    # --- Critical KPIs: individual fetches ---
+    _fetch_nifty50(snapshot, period)
+    _fetch_india_vix(snapshot, period)
+    _fetch_usdinr(snapshot, period)
+
+    # --- Global indices: batch fetch (nice-to-have, failures are tolerable) ---
     try:
         gf = GlobalFetcher(max_retries=2, retry_delay=1.0)
         records = gf.fetch_recent_indices(period=period)
-
-        if not records:
-            logger.warning("No macro data fetched")
-            return
-
-        # Latest record for headline metrics
-        latest = records[-1]
-        prev = records[-2] if len(records) >= 2 else {}
-
-        snapshot.nifty50_close = latest.get("nifty50_close") or 0.0
-        snapshot.nifty50_change_pct = (latest.get("nifty50_ret") or 0.0) * 100
-
-        # WoW for Nifty
-        if len(records) >= 6:
-            week_ago = records[-6]
-            n_close = latest.get("nifty50_close") or 0
-            w_close = week_ago.get("nifty50_close") or 0
-            if w_close:
-                snapshot.nifty50_wow_pct = ((n_close - w_close) / w_close) * 100
-
-        snapshot.india_vix = latest.get("india_vix") or 0.0
-        snapshot.india_vix_change = (latest.get("india_vix_change") or 0.0) * 100
-        snapshot.usdinr = latest.get("usdinr") or 0.0
-        snapshot.usdinr_change = (latest.get("usdinr_change") or 0.0) * 100
-
-        # VIX and USD/INR time series for charts
-        vix_data = [{"date": r["date"], "India VIX": r.get("india_vix")} for r in records if r.get("india_vix")]
-        snapshot.vix_series = pd.DataFrame(vix_data).set_index("date") if vix_data else pd.DataFrame()
-
-        usdinr_data = [{"date": r["date"], "USD/INR": r.get("usdinr")} for r in records if r.get("usdinr")]
-        snapshot.usdinr_series = pd.DataFrame(usdinr_data).set_index("date") if usdinr_data else pd.DataFrame()
-
-        # Global indices
-        from dashboard.config import GLOBAL_INDEX_DISPLAY
-        for key, display_name in GLOBAL_INDEX_DISPLAY.items():
-            ret_key = f"{key.lower()}_ret"
-            ret_val = latest.get(ret_key)
-            snapshot.global_indices[display_name] = {
-                "ret_pct": round((ret_val or 0) * 100, 2),
-            }
-
-        # FII/DII
-        try:
-            nf = NSEFetcher(max_retries=2, retry_delay=1.0)
-            fii_dii = nf.fetch_recent_fii_dii(lookback_days=10)
-            if fii_dii:
-                snapshot.fii_dii_series = fii_dii
-                latest_fii = fii_dii[-1]
-                snapshot.fii_net_buy = latest_fii.get("fii_net_buy", 0.0)
-                snapshot.dii_net_buy = latest_fii.get("dii_net_buy", 0.0)
-        except Exception as e:
-            logger.warning(f"FII/DII fetch failed: {e}")
-
+        if records:
+            latest = records[-1]
+            from dashboard.config import GLOBAL_INDEX_DISPLAY
+            for key, display_name in GLOBAL_INDEX_DISPLAY.items():
+                ret_key = f"{key.lower()}_ret"
+                ret_val = latest.get(ret_key)
+                snapshot.global_indices[display_name] = {
+                    "ret_pct": round((ret_val or 0) * 100, 2),
+                }
     except Exception as e:
-        logger.error(f"Macro data fetch failed: {e}")
+        logger.warning(f"Global indices batch fetch failed: {e}")
+
+    # --- FII/DII ---
+    try:
+        nf = NSEFetcher(max_retries=2, retry_delay=1.0)
+        fii_dii = nf.fetch_recent_fii_dii(lookback_days=10)
+        if fii_dii:
+            snapshot.fii_dii_series = fii_dii
+            latest_fii = fii_dii[-1]
+            snapshot.fii_net_buy = latest_fii.get("fii_net_buy", 0.0)
+            snapshot.dii_net_buy = latest_fii.get("dii_net_buy", 0.0)
+    except Exception as e:
+        logger.warning(f"FII/DII fetch failed: {e}")
+
+
+def _fetch_single_ticker(ticker: str, period: str) -> pd.Series:
+    """Fetch close series for a single ticker. Returns empty Series on failure."""
+    try:
+        data = yf.download(
+            ticker, period=period, interval="1d",
+            auto_adjust=True, progress=False, threads=False,
+        )
+        if data.empty:
+            return pd.Series(dtype=float)
+        close = data["Close"]
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+        return close.dropna()
+    except Exception as e:
+        logger.warning(f"Single-ticker fetch failed for {ticker}: {e}")
+        return pd.Series(dtype=float)
+
+
+def _fetch_nifty50(snapshot: MarketSnapshot, period: str):
+    """Fetch Nifty 50 index close and compute day/week changes."""
+    closes = _fetch_single_ticker("^NSEI", period)
+    if len(closes) < 2:
+        return
+
+    latest = float(closes.iloc[-1])
+    prev = float(closes.iloc[-2])
+    snapshot.nifty50_close = latest
+    snapshot.nifty50_change_pct = ((latest - prev) / prev) * 100 if prev else 0
+
+    if len(closes) >= 6:
+        week_ago = float(closes.iloc[-6])
+        if week_ago:
+            snapshot.nifty50_wow_pct = ((latest - week_ago) / week_ago) * 100
+
+
+def _fetch_india_vix(snapshot: MarketSnapshot, period: str):
+    """Fetch India VIX."""
+    closes = _fetch_single_ticker("^INDIAVIX", period)
+    if len(closes) < 2:
+        return
+
+    snapshot.india_vix = float(closes.iloc[-1])
+    prev = float(closes.iloc[-2])
+    if prev:
+        snapshot.india_vix_change = ((snapshot.india_vix - prev) / prev) * 100
+
+    vix_data = [{"date": str(d.date()) if hasattr(d, "date") else str(d)[:10],
+                 "India VIX": float(v)} for d, v in closes.items()]
+    snapshot.vix_series = pd.DataFrame(vix_data).set_index("date") if vix_data else pd.DataFrame()
+
+
+def _fetch_usdinr(snapshot: MarketSnapshot, period: str):
+    """Fetch USD/INR exchange rate."""
+    closes = _fetch_single_ticker("INR=X", period)
+    if len(closes) < 2:
+        return
+
+    snapshot.usdinr = float(closes.iloc[-1])
+    prev = float(closes.iloc[-2])
+    if prev:
+        snapshot.usdinr_change = ((snapshot.usdinr - prev) / prev) * 100
+
+    usdinr_data = [{"date": str(d.date()) if hasattr(d, "date") else str(d)[:10],
+                    "USD/INR": float(v)} for d, v in closes.items()]
+    snapshot.usdinr_series = pd.DataFrame(usdinr_data).set_index("date") if usdinr_data else pd.DataFrame()
 
 
 def _populate_sectoral_data(snapshot: MarketSnapshot, period: str):

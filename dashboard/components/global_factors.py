@@ -1,15 +1,15 @@
-"""Global indices and supply chain factors."""
+"""Global indices and supply chain factors — value-chain visualization."""
 
 import streamlit as st
 import pandas as pd
 
 from dashboard.data_loader import MarketSnapshot
-from dashboard.config import SECTOR_SUPPLY_CHAIN, SUPPLY_CHAIN_TICKERS
+from dashboard.config import SECTOR_SUPPLY_CHAIN, SECTOR_INDEX_TO_SECTOR
 
 
 def render_global_indices(snapshot: MarketSnapshot):
     """Render global index metric cards."""
-    st.subheader("Global Indices")
+    st.markdown("#### Global Indices")
 
     if not snapshot.global_indices:
         st.info("Global index data unavailable")
@@ -21,62 +21,257 @@ def render_global_indices(snapshot: MarketSnapshot):
     for col, (name, data) in zip(cols, indices):
         with col:
             ret = data.get("ret_pct", 0)
-            st.metric(name, f"{ret:+.2f}%", delta=None)
+            st.metric(name, f"{ret:+.2f}%")
 
 
 def render_supply_chain(snapshot: MarketSnapshot):
-    """Render supply chain factors table with sector impact annotations."""
-    st.subheader("Supply Chain & International Factors")
+    """Render the supply chain as a series of value-chain visualizations.
+
+    Each row = international factor(s) → sector → top affected stock,
+    with chain connectors that visually 'break' under shock conditions.
+    """
+    st.markdown("#### Supply Chain & International Factors")
 
     if snapshot.supply_chain.empty:
         st.info("Supply chain data unavailable")
         return
 
-    # Display the data table
     df = snapshot.supply_chain.copy()
-    st.dataframe(
-        df,
-        column_config={
-            "Factor": st.column_config.TextColumn("Factor", width="medium"),
-            "Price": st.column_config.NumberColumn("Price", format="%.2f"),
-            "DoD %": st.column_config.NumberColumn("Day %", format="%.2f%%"),
-            "WoW %": st.column_config.NumberColumn("Week %", format="%.2f%%"),
-        },
-        use_container_width=True,
-        hide_index=True,
+    factor_data = {
+        row["Factor"]: {"price": row["Price"], "dod": row["DoD %"], "wow": row["WoW %"]}
+        for _, row in df.iterrows()
+    }
+
+    # Sector → sectoral_index row lookup
+    sector_to_idx = {}
+    if not snapshot.sectoral_data.empty:
+        for idx_name, sect_name in SECTOR_INDEX_TO_SECTOR.items():
+            if sect_name in sector_to_idx:
+                continue
+            row = snapshot.sectoral_data[snapshot.sectoral_data["Index"] == idx_name]
+            if not row.empty:
+                sector_to_idx[sect_name] = row.iloc[0]
+
+    # Top mover per sector (largest absolute move)
+    sector_top_stock = {}
+    if not snapshot.stock_changes.empty:
+        for sect, group in snapshot.stock_changes.groupby("sector"):
+            top = group.iloc[group["dod_pct"].abs().argmax()]
+            sector_top_stock[sect] = {"symbol": top["symbol"], "change": float(top["dod_pct"])}
+
+    # Factors-at-a-glance strip
+    _render_factor_strip(factor_data)
+
+    # Legend
+    st.markdown(
+        '<div style="font-size:0.72rem;color:#7a8294;margin:18px 0 14px 0;">'
+        'Each row traces an international factor &rarr; Indian sector &rarr; top affected stock. '
+        'Chain link state: '
+        '<span style="color:#eb5757;font-weight:600;">&#9889; Shock</span> (factor &gt;5%) '
+        '&middot; <span style="color:#f5a623;font-weight:600;">&#9888; Pressure</span> (1.5–5%) '
+        '&middot; <span style="color:#00d09c;font-weight:600;">&#9679; Stable</span> (&lt;1.5%)'
+        '</div>',
+        unsafe_allow_html=True,
     )
 
-    # Sector impact annotations
-    st.markdown("**Sector Impact Analysis**")
-
-    # Build a mapping from factor name to its current movement
-    factor_moves = {}
-    for _, row in df.iterrows():
-        factor_name = row["Factor"]
-        dod = row.get("DoD %", 0)
-        factor_moves[factor_name] = dod
-
-    # For each sector that has supply chain links, show the impact
-    impacted_sectors = []
+    # Build chain rows, sorted by max factor severity (most stressed first)
+    chains = []
     for sector, info in SECTOR_SUPPLY_CHAIN.items():
-        relevant_factors = []
-        for f in info["factors"]:
-            if f in factor_moves:
-                move = factor_moves[f]
-                if abs(move) > 0.5:  # Only show meaningful moves
-                    direction = "up" if move > 0 else "down"
-                    relevant_factors.append(f"{f} {move:+.1f}%")
+        factors = [(f, factor_data[f]) for f in info["factors"] if f in factor_data]
+        if not factors:
+            continue
+        max_severity = max(abs(fd["dod"]) for _, fd in factors)
+        chains.append({
+            "sector": sector,
+            "factors": factors,
+            "note": info["note"],
+            "severity": max_severity,
+            "sector_row": sector_to_idx.get(sector),
+            "top_stock": sector_top_stock.get(sector),
+        })
+    chains.sort(key=lambda c: c["severity"], reverse=True)
 
-        if relevant_factors:
-            factors_str = ", ".join(relevant_factors)
-            impacted_sectors.append({
-                "Sector": sector,
-                "Active Factors": factors_str,
-                "Context": info["note"],
-            })
+    if not chains:
+        st.caption("No supply-chain factor data to map.")
+        return
 
-    if impacted_sectors:
-        impact_df = pd.DataFrame(impacted_sectors)
-        st.dataframe(impact_df, use_container_width=True, hide_index=True)
+    for chain in chains:
+        st.markdown(_render_chain_row(chain), unsafe_allow_html=True)
+
+
+def _render_factor_strip(factor_data: dict):
+    """Compact horizontal chips showing all 8 factors at a glance."""
+    if not factor_data:
+        return
+
+    chips = []
+    for name, fd in factor_data.items():
+        dod = fd["dod"]
+        if dod > 0:
+            color, bg, border = "#00d09c", "rgba(0,208,156,0.10)", "rgba(0,208,156,0.25)"
+        elif dod < 0:
+            color, bg, border = "#eb5757", "rgba(235,87,87,0.10)", "rgba(235,87,87,0.25)"
+        else:
+            color, bg, border = "#c9cfd9", "rgba(201,207,217,0.06)", "rgba(201,207,217,0.18)"
+        chips.append(
+            f'<div style="background:{bg};border:1px solid {border};border-radius:8px;'
+            f'padding:8px 12px;min-width:130px;flex:1 1 130px;">'
+            f'<div style="font-size:0.66rem;color:#7a8294;font-weight:500;'
+            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{name}</div>'
+            f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+            f'margin-top:3px;gap:8px;">'
+            f'<span style="font-size:0.82rem;font-weight:600;color:#e8ecf1;">'
+            f'{fd["price"]:,.2f}</span>'
+            f'<span style="font-size:0.78rem;font-weight:600;color:{color};">'
+            f'{dod:+.2f}%</span>'
+            f'</div>'
+            f'</div>'
+        )
+
+    st.markdown(
+        f'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">'
+        f'{"".join(chips)}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _stress_style(severity: float) -> dict:
+    """Return color/icon/label for a chain-link based on factor severity."""
+    if severity >= 5:
+        return {
+            "color": "#eb5757",
+            "bg": "rgba(235,87,87,0.14)",
+            "icon": "&#9889;",  # ⚡
+            "label": "SHOCK",
+            "line_style": "dashed",
+        }
+    if severity >= 1.5:
+        return {
+            "color": "#f5a623",
+            "bg": "rgba(245,166,35,0.14)",
+            "icon": "&#9888;",  # ⚠
+            "label": "PRESSURE",
+            "line_style": "dotted",
+        }
+    return {
+        "color": "#00d09c",
+        "bg": "rgba(0,208,156,0.14)",
+        "icon": "&#9679;",  # ●
+        "label": "STABLE",
+        "line_style": "solid",
+    }
+
+
+def _node_html(label: str, name: str, value_str: str, value_color: str,
+               border: str = "#2a3142", min_width: int = 140) -> str:
+    """Render a chain node (factor / sector / stock) as a card."""
+    return (
+        f'<div style="background:#151922;border:1px solid {border};border-radius:10px;'
+        f'padding:10px 14px;min-width:{min_width}px;flex:0 0 auto;">'
+        f'<div style="font-size:0.6rem;color:#7a8294;text-transform:uppercase;'
+        f'letter-spacing:0.06em;font-weight:600;">{label}</div>'
+        f'<div style="font-size:0.84rem;font-weight:600;color:#e8ecf1;margin-top:3px;'
+        f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;">'
+        f'{name}</div>'
+        f'<div style="font-size:0.78rem;font-weight:600;color:{value_color};margin-top:4px;">'
+        f'{value_str}</div>'
+        f'</div>'
+    )
+
+
+def _connector_html(severity: float) -> str:
+    """Horizontal chain-link connector with stress-aware styling."""
+    s = _stress_style(severity)
+    return (
+        f'<div style="display:flex;flex-direction:column;align-items:center;'
+        f'min-width:100px;flex:1 1 80px;padding:0 4px;">'
+        f'<div style="display:flex;align-items:center;width:100%;">'
+        f'<div style="flex:1;height:0;border-top:2px {s["line_style"]} {s["color"]};opacity:0.7;">'
+        f'</div>'
+        f'<div style="background:{s["bg"]};color:{s["color"]};padding:4px 10px;'
+        f'border:1px solid {s["color"]};border-radius:14px;margin:0 6px;'
+        f'font-size:0.85rem;font-weight:700;line-height:1;">{s["icon"]}</div>'
+        f'<div style="flex:1;height:0;border-top:2px {s["line_style"]} {s["color"]};opacity:0.7;">'
+        f'</div>'
+        f'</div>'
+        f'<div style="font-size:0.6rem;color:{s["color"]};font-weight:700;'
+        f'letter-spacing:0.08em;margin-top:6px;">{s["label"]}</div>'
+        f'</div>'
+    )
+
+
+def _render_chain_row(c: dict) -> str:
+    """Render one full chain: factor(s) → connector → sector → connector → stock."""
+    sector = c["sector"]
+    sector_row = c["sector_row"]
+    top_stock = c["top_stock"]
+    factors = c["factors"]
+    severity = c["severity"]
+
+    # Factor block(s) — stacked vertically if multiple
+    factor_nodes = []
+    for fname, fd in factors:
+        dod = fd["dod"]
+        f_color = "#00d09c" if dod > 0 else "#eb5757" if dod < 0 else "#c9cfd9"
+        f_border = ("rgba(235,87,87,0.4)" if abs(dod) >= 5
+                    else "rgba(245,166,35,0.4)" if abs(dod) >= 1.5
+                    else "#2a3142")
+        factor_nodes.append(_node_html(
+            "Global Factor", fname, f"{dod:+.2f}%  &middot;  {fd['price']:,.2f}",
+            f_color, border=f_border, min_width=170,
+        ))
+    factor_block = (
+        f'<div style="display:flex;flex-direction:column;gap:6px;flex:0 0 auto;">'
+        f'{"".join(factor_nodes)}</div>'
+    )
+
+    # Sector node
+    if sector_row is not None:
+        sect_chg = float(sector_row["DoD %"])
+        sect_color = "#00d09c" if sect_chg > 0 else "#eb5757" if sect_chg < 0 else "#c9cfd9"
+        sect_idx_name = sector_row["Index"]
+        sector_node = _node_html(
+            "Indian Sector",
+            f"{sector} &middot; {sect_idx_name}",
+            f"{sect_chg:+.2f}%  &middot;  {float(sector_row['Close']):,.0f}",
+            sect_color, min_width=200,
+        )
     else:
-        st.caption("No significant supply chain movements today (>0.5% threshold)")
+        sector_node = _node_html(
+            "Indian Sector", sector, "no NSE index", "#7a8294", min_width=160,
+        )
+
+    # Stock node
+    if top_stock:
+        stk_chg = top_stock["change"]
+        stk_color = "#00d09c" if stk_chg > 0 else "#eb5757" if stk_chg < 0 else "#c9cfd9"
+        stock_node = _node_html(
+            "Top Mover", top_stock["symbol"], f"{stk_chg:+.2f}%",
+            stk_color, min_width=130,
+        )
+    else:
+        stock_node = _node_html(
+            "Top Mover", "—", "no Nifty 50 stock", "#7a8294", min_width=130,
+        )
+
+    # Sector-level severity for the second connector (sector vs stock —
+    # use sector move magnitude if available, else fall back to factor severity)
+    sector_severity = (abs(float(sector_row["DoD %"])) if sector_row is not None
+                       else severity * 0.5)
+
+    return (
+        f'<div style="background:#0f131c;border:1px solid #232834;border-radius:12px;'
+        f'padding:14px 16px;margin-bottom:10px;">'
+        f'<div style="display:flex;align-items:stretch;flex-wrap:wrap;gap:0;">'
+        f'{factor_block}'
+        f'{_connector_html(severity)}'
+        f'{sector_node}'
+        f'{_connector_html(sector_severity)}'
+        f'{stock_node}'
+        f'</div>'
+        f'<div style="font-size:0.7rem;color:#7a8294;margin-top:12px;'
+        f'padding-top:10px;border-top:1px solid #232834;line-height:1.4;">'
+        f'{c["note"]}</div>'
+        f'</div>'
+    )
