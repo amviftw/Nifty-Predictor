@@ -33,60 +33,96 @@ from dashboard.components.predictions_panel import render_predictions_panel
 from dashboard.components.charts_view import render_charts_view
 
 
+_TOP_BAR_CSS = """
+<style>
+/* Tight top-bar spacing */
+.block-container { padding-top: 1.2rem; }
+
+/* Compact, horizontal radios styled like segmented pills */
+div[data-testid="stRadio"] > label { display: none; }
+div[data-testid="stRadio"] > div { gap: 0.35rem; }
+div[data-testid="stRadio"] label {
+    background: #1e2130;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px;
+    padding: 0.35rem 0.9rem;
+    cursor: pointer;
+}
+div[data-testid="stRadio"] label:has(input:checked) {
+    background: #1a237e;
+    border-color: #3f51b5;
+}
+</style>
+"""
+
+
+def _render_top_bar() -> tuple[str, str]:
+    """Render the top-of-page mode + view toggles and refresh button.
+
+    Returns
+    -------
+    (mode, view_lower)
+    """
+    st.markdown(_TOP_BAR_CSS, unsafe_allow_html=True)
+
+    left, center, right = st.columns([2.2, 2, 1])
+
+    with left:
+        mode = st.radio(
+            "Mode",
+            ["Market Overview", "Charts"],
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="app_mode",
+        )
+
+    with center:
+        view = st.radio(
+            "View",
+            ["Daily", "Weekly"],
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="app_view",
+            disabled=(mode == "Charts"),
+        )
+
+    with right:
+        if st.button("↻ Refresh", use_container_width=True, key="app_refresh"):
+            st.cache_data.clear()
+            st.rerun()
+
+    st.divider()
+    return mode, view.lower()
+
+
 def main():
     st.set_page_config(
         page_title="Nifty Market Dashboard",
         page_icon="📊",
         layout="wide",
-        initial_sidebar_state="expanded",
+        initial_sidebar_state="collapsed",
     )
 
-    # --- Sidebar ---
+    # --- Sidebar: kept for About / reference only ---
     with st.sidebar:
         st.title("Nifty Market Dashboard")
-        st.markdown("Live Indian equity market fundamentals")
-
-        st.divider()
-
-        mode = st.radio(
-            "Mode",
-            ["Market Overview", "Charts"],
-            index=0,
-            help=(
-                "Market Overview: macro, sectoral and stock-level fundamentals. "
-                "Charts: TradingView-style candles with indicators."
-            ),
-        )
-
-        view = st.radio(
-            "View",
-            ["Daily", "Weekly"],
-            index=0,
-            help="Daily: Day-over-day changes. Weekly: Week-over-week changes.",
-            disabled=(mode == "Charts"),
-        )
-
-        st.divider()
-
-        if st.button("Refresh Data", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-
-        st.divider()
-
-        st.markdown("**About**")
         st.caption(
             "Data sourced from Yahoo Finance, NSE India, and Google News. "
             "All sources are free and require no API keys. "
             "Data refreshes automatically every 5 minutes."
         )
 
+    # --- Top bar: mode / view / refresh ---
+    mode, view_key = _render_top_bar()
+
     # --- Route to mode ---
     if mode == "Charts":
         render_charts_view()
         return
 
-    _render_market_overview(view.lower())
+    _render_market_overview(view_key)
 
 
 def _render_market_overview(view_key: str):
