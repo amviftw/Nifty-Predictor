@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
 
-from dashboard.data_loader import load_market_snapshot
+from dashboard.data_loader import load_market_snapshot, _market_minute_bucket
 from dashboard.components.header import render_header
 from dashboard.components.market_overview import render_key_metrics, render_sectoral_heatmap
 from dashboard.components.top_movers import render_top_movers
@@ -364,59 +364,41 @@ def main():
 
     with toggle_left:
         st.markdown('<div class="mode-toggle-wrap">', unsafe_allow_html=True)
-        if hasattr(st, "segmented_control"):
-            mode = st.segmented_control(
-                "Mode",
-                mode_options,
-                default="Market Overview",
-                label_visibility="collapsed",
-                key="mode_toggle",
-            ) or "Market Overview"
-        else:
-            mode = st.radio(
-                "Mode",
-                mode_options,
-                index=0,
-                horizontal=True,
-                label_visibility="collapsed",
-                key="mode_toggle",
-            )
+        mode = st.radio(
+            "Mode",
+            mode_options,
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="mode_toggle",
+        )
         st.markdown('</div>', unsafe_allow_html=True)
 
     with toggle_right:
         if mode == "Market Overview":
             st.markdown('<div class="mode-toggle-wrap" style="text-align:right;">', unsafe_allow_html=True)
-            if hasattr(st, "segmented_control"):
-                view = st.segmented_control(
-                    "Timeframe",
-                    view_options,
-                    default="Daily",
-                    label_visibility="collapsed",
-                    key="view_toggle",
-                ) or "Daily"
-            else:
-                view = st.radio(
-                    "Timeframe",
-                    view_options,
-                    index=0,
-                    horizontal=True,
-                    label_visibility="collapsed",
-                    key="view_toggle",
-                )
+            view = st.radio(
+                "Timeframe",
+                view_options,
+                index=0,
+                horizontal=True,
+                label_visibility="collapsed",
+                key="view_toggle",
+            )
             st.markdown('</div>', unsafe_allow_html=True)
         else:
             view = "Daily"
 
     # --- Target Hunter mode ---
     if mode == "Target Hunter":
-        snapshot = load_market_snapshot(view="daily")
+        snapshot = load_market_snapshot(view="daily", _bucket=_market_minute_bucket())
         render_header(snapshot)
         render_target_hunter()
         return
 
     # --- Market Overview mode ---
     view_key = view.lower()
-    snapshot = load_market_snapshot(view=view_key)
+    snapshot = load_market_snapshot(view=view_key, _bucket=_market_minute_bucket())
 
     render_header(snapshot)
     render_key_metrics(snapshot)

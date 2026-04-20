@@ -85,9 +85,27 @@ class MarketSnapshot:
     unchanged_count: int = 0
 
 
+def _market_minute_bucket() -> int:
+    """Returns a minute-bucket key during market hours, else hour-bucket.
+
+    Market hours (9:00–16:00 IST on trading days): 1-min buckets so cached
+    snapshots invalidate every minute and chips show fresh prints.
+    Off-hours: hour-bucket so we don't hammer Yahoo when nothing's moving.
+    """
+    now = datetime.now(IST)
+    today = date.today()
+    if is_trading_day(today) and 9 <= now.hour <= 16:
+        return int(now.timestamp() // 60)
+    return int(now.timestamp() // 3600)
+
+
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="Fetching live market data...")
-def load_market_snapshot(view: str = "daily") -> MarketSnapshot:
-    """Master function: fetches all data and returns a MarketSnapshot."""
+def load_market_snapshot(view: str = "daily", _bucket: int = 0) -> MarketSnapshot:
+    """Master function: fetches all data and returns a MarketSnapshot.
+
+    The `_bucket` argument is a cache-key only — pass `_market_minute_bucket()`
+    so the cache rotates every minute during market hours.
+    """
     now = datetime.now(IST)
     today = date.today()
     trading_day = today if is_trading_day(today) else prev_trading_day(today)
