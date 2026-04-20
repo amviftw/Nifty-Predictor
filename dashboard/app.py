@@ -23,6 +23,7 @@ from dashboard.components.predictions_panel import render_predictions_panel
 from dashboard.components.target_hunter import render_target_hunter
 from dashboard.components.ema_chart import render_ema_chart
 from dashboard.components.sector_momentum import render_sector_momentum
+from dashboard.components.charts_view import render_charts_view
 
 
 _CUSTOM_CSS = """
@@ -375,7 +376,7 @@ def main():
 
     # --- Toggles (top of page, pill-style) ---
     toggle_left, toggle_mid, toggle_right = st.columns([3, 2, 1])
-    mode_options = ["Market Overview", "Target Hunter"]
+    mode_options = ["Market Overview", "Target Hunter", "Charts"]
     view_options = ["Daily", "Weekly"]
 
     with toggle_left:
@@ -411,6 +412,11 @@ def main():
             st.cache_data.clear()
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- Charts mode ---
+    if mode == "Charts":
+        render_charts_view()
+        return
 
     # --- Target Hunter mode ---
     if mode == "Target Hunter":
