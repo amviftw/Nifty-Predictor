@@ -30,6 +30,7 @@ from dashboard.components.macro_panel import render_macro_panel
 from dashboard.components.global_factors import render_global_indices, render_supply_chain
 from dashboard.components.sector_deep_dive import render_sector_deep_dive, render_sector_rotation
 from dashboard.components.predictions_panel import render_predictions_panel
+from dashboard.components.charts_view import render_charts_view
 
 
 def main():
@@ -47,11 +48,22 @@ def main():
 
         st.divider()
 
+        mode = st.radio(
+            "Mode",
+            ["Market Overview", "Charts"],
+            index=0,
+            help=(
+                "Market Overview: macro, sectoral and stock-level fundamentals. "
+                "Charts: TradingView-style candles with indicators."
+            ),
+        )
+
         view = st.radio(
             "View",
             ["Daily", "Weekly"],
             index=0,
             help="Daily: Day-over-day changes. Weekly: Week-over-week changes.",
+            disabled=(mode == "Charts"),
         )
 
         st.divider()
@@ -69,57 +81,46 @@ def main():
             "Data refreshes automatically every 5 minutes."
         )
 
-    # --- Load Data ---
-    view_key = view.lower()
+    # --- Route to mode ---
+    if mode == "Charts":
+        render_charts_view()
+        return
+
+    _render_market_overview(view.lower())
+
+
+def _render_market_overview(view_key: str):
+    """Render the original Market Overview dashboard."""
     snapshot = load_market_snapshot(view=view_key)
 
-    # --- Main Content ---
     st.title("Indian Equity Market Dashboard")
     render_header(snapshot)
 
     st.divider()
-
-    # Row 1: Key Metrics
     render_key_metrics(snapshot)
 
     st.divider()
-
-    # Row 2: Sectoral Indices
     render_sectoral_heatmap(snapshot)
 
     st.divider()
-
-    # Row 3: Top Movers
     render_top_movers(snapshot)
 
     st.divider()
-
-    # Row 4: Macro Panel
     render_macro_panel(snapshot)
 
     st.divider()
-
-    # Row 5: Global Indices
     render_global_indices(snapshot)
 
     st.divider()
-
-    # Row 6: Supply Chain Factors
     render_supply_chain(snapshot)
 
     st.divider()
-
-    # Row 7: Sector Rotation
     render_sector_rotation(snapshot)
 
     st.divider()
-
-    # Row 8: Sector Deep Dive
     render_sector_deep_dive(snapshot)
 
     st.divider()
-
-    # Row 9: ML Predictions (optional)
     render_predictions_panel()
 
 
