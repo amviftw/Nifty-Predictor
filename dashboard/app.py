@@ -31,6 +31,7 @@ from dashboard.components.global_factors import render_global_indices, render_su
 from dashboard.components.sector_deep_dive import render_sector_deep_dive, render_sector_rotation
 from dashboard.components.predictions_panel import render_predictions_panel
 from dashboard.components.charts_view import render_charts_view
+from dashboard.components.scenario_lab import render_scenario_lab
 
 
 _TOP_BAR_CSS = """
@@ -70,7 +71,7 @@ def _render_top_bar() -> tuple[str, str]:
     with left:
         mode = st.radio(
             "Mode",
-            ["Market Overview", "Charts"],
+            ["Market Overview", "Charts", "Scenario Lab"],
             index=0,
             horizontal=True,
             label_visibility="collapsed",
@@ -85,7 +86,7 @@ def _render_top_bar() -> tuple[str, str]:
             horizontal=True,
             label_visibility="collapsed",
             key="app_view",
-            disabled=(mode == "Charts"),
+            disabled=(mode != "Market Overview"),
         )
 
     with right:
@@ -120,6 +121,10 @@ def main():
     # --- Route to mode ---
     if mode == "Charts":
         render_charts_view()
+        return
+
+    if mode == "Scenario Lab":
+        render_scenario_lab()
         return
 
     _render_market_overview(view_key)
