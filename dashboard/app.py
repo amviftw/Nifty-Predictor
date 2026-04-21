@@ -23,6 +23,7 @@ from dashboard.components.predictions_panel import render_predictions_panel
 from dashboard.components.target_hunter import render_target_hunter
 from dashboard.components.ema_chart import render_ema_chart
 from dashboard.components.sector_momentum import render_sector_momentum
+from dashboard.components.scenario_lab import render_scenario_lab
 
 
 _CUSTOM_CSS = """
@@ -375,7 +376,7 @@ def main():
 
     # --- Toggles (top of page, pill-style) ---
     toggle_left, toggle_mid, toggle_right = st.columns([3, 2, 1])
-    mode_options = ["Market Overview", "Target Hunter"]
+    mode_options = ["Market Overview", "Target Hunter", "Scenario Lab"]
     view_options = ["Daily", "Weekly"]
 
     with toggle_left:
@@ -417,6 +418,11 @@ def main():
         snapshot = load_market_snapshot(view="daily", _bucket=_market_minute_bucket())
         render_header(snapshot)
         render_target_hunter()
+        return
+
+    # --- Scenario Lab mode ---
+    if mode == "Scenario Lab":
+        render_scenario_lab()
         return
 
     # --- Market Overview mode ---
