@@ -1,8 +1,9 @@
 """
 Analyst data fetcher for the Target Hunter view.
 
-Pulls analyst price targets and recent broker revisions from yfinance
-for every Nifty 50 constituent. Cached separately from the market snapshot
+Pulls analyst price targets, recent broker revisions, and 5-year all-time-high
+context from yfinance for every stock in the chosen universe (Nifty 50,
+curated Midcap subset, or both). Cached separately from the market snapshot
 since analyst data moves much more slowly (hours/days, not minutes).
 """
 
@@ -11,6 +12,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 import pandas as pd
 import yfinance as yf
@@ -20,12 +22,15 @@ from loguru import logger
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.nifty50_tickers import NIFTY50_STOCKS
+from config.midcap_tickers import MIDCAP_STOCKS
 from dashboard.config import (
     ANALYST_CACHE_TTL_SECONDS,
     TARGET_REVISION_WINDOW_DAYS,
 )
 
 IST = timezone(timedelta(hours=5, minutes=30))
+
+Universe = Literal["Nifty 50", "Midcap", "Both"]
 
 # yfinance Ticker.info keys we care about
 _INFO_KEYS = (
@@ -44,12 +49,13 @@ _INFO_KEYS = (
 
 @dataclass
 class AnalystSnapshot:
-    """Per-symbol analyst coverage: targets, recommendations, recent revisions."""
+    """Per-symbol analyst coverage: targets, recommendations, revisions, ATH."""
 
     timestamp: datetime
-    # per-symbol dict of scalar analyst fields
+    universe: str = "Nifty 50"
+    # per-symbol dict of scalar analyst fields (+ universe label, ATH fields)
     targets: dict = field(default_factory=dict)
-    # per-symbol DataFrame of recent revisions (firm, date, from_grade, to_grade, action)
+    # per-symbol DataFrame of recent revisions
     revisions: dict = field(default_factory=dict)
     # symbols where fetch failed
     failed: list = field(default_factory=list)
@@ -76,7 +82,6 @@ def _fetch_analyst_targets(ticker: yf.Ticker) -> dict:
         return {}
 
     out = {k: info.get(k) for k in _INFO_KEYS}
-    # normalise numerics
     for k in (
         "currentPrice",
         "targetMeanPrice",
@@ -106,7 +111,6 @@ def _fetch_recent_revisions(ticker: yf.Ticker, window_days: int) -> pd.DataFrame
 
     df = df.copy()
 
-    # Date is either the index or a 'GradeDate' column depending on yfinance version
     if not isinstance(df.index, pd.DatetimeIndex):
         date_col = next((c for c in df.columns if "date" in c.lower()), None)
         if date_col:
@@ -125,19 +129,66 @@ def _fetch_recent_revisions(ticker: yf.Ticker, window_days: int) -> pd.DataFrame
     return df.sort_index(ascending=False)
 
 
-@st.cache_data(ttl=ANALYST_CACHE_TTL_SECONDS, show_spinner="Fetching analyst targets...")
-def load_analyst_snapshot() -> AnalystSnapshot:
-    """Fetch analyst targets + recent revisions for every Nifty 50 stock."""
-    snapshot = AnalystSnapshot(timestamp=datetime.now(IST))
+def _fetch_ath(ticker: yf.Ticker) -> dict:
+    """Return 5y all-time-high context: ath, ath_date, drawdown_pct."""
+    try:
+        hist = ticker.history(period="5y", interval="1d", auto_adjust=False)
+    except Exception as e:
+        logger.debug(f"5y history failed: {e}")
+        return {}
 
-    symbols = list(NIFTY50_STOCKS.items())
-    for i, (symbol, (yahoo_ticker, _, _)) in enumerate(symbols):
+    if hist is None or hist.empty or "Close" not in hist.columns:
+        return {}
+
+    close = hist["Close"].dropna()
+    if close.empty:
+        return {}
+
+    last = float(close.iloc[-1])
+    ath_idx = close.idxmax()
+    ath = float(close.loc[ath_idx])
+    ath_date = (
+        ath_idx.strftime("%Y-%m-%d")
+        if hasattr(ath_idx, "strftime") else str(ath_idx)
+    )
+    drawdown_pct = (ath - last) / ath * 100 if ath > 0 else 0.0
+    return {
+        "ath": round(ath, 2),
+        "ath_date": ath_date,
+        "drawdown_pct": round(drawdown_pct, 2),
+    }
+
+
+def _universe_items(universe: Universe) -> list[tuple[str, tuple[str, str, str], str]]:
+    """Return [(symbol, (ticker, company, sector), universe_label)]."""
+    items: list[tuple[str, tuple[str, str, str], str]] = []
+    if universe in ("Nifty 50", "Both"):
+        for sym, meta in NIFTY50_STOCKS.items():
+            items.append((sym, meta, "Nifty 50"))
+    if universe in ("Midcap", "Both"):
+        for sym, meta in MIDCAP_STOCKS.items():
+            if universe == "Both" and sym in NIFTY50_STOCKS:
+                continue
+            items.append((sym, meta, "Midcap"))
+    return items
+
+
+@st.cache_data(ttl=ANALYST_CACHE_TTL_SECONDS, show_spinner="Fetching analyst targets...")
+def load_analyst_snapshot(universe: Universe = "Nifty 50") -> AnalystSnapshot:
+    """Fetch analyst targets + revisions + 5y ATH for every stock in the universe."""
+    snapshot = AnalystSnapshot(timestamp=datetime.now(IST), universe=universe)
+
+    items = _universe_items(universe)
+    for i, (symbol, (yahoo_ticker, _company, _sector), uni_label) in enumerate(items):
         try:
             t = yf.Ticker(yahoo_ticker)
             targets = _fetch_analyst_targets(t)
             if not targets or targets.get("numberOfAnalystOpinions", 0) == 0:
                 snapshot.failed.append(symbol)
                 continue
+
+            targets["universe"] = uni_label
+            targets.update(_fetch_ath(t))
 
             snapshot.targets[symbol] = targets
             revisions = _fetch_recent_revisions(t, TARGET_REVISION_WINDOW_DAYS)
@@ -148,12 +199,12 @@ def load_analyst_snapshot() -> AnalystSnapshot:
             snapshot.failed.append(symbol)
 
         # Gentle rate-limit against Yahoo
-        if i < len(symbols) - 1:
+        if i < len(items) - 1:
             time.sleep(0.3)
 
     logger.info(
-        f"Analyst snapshot: {len(snapshot.targets)} covered, "
-        f"{len(snapshot.revisions)} with recent revisions, "
+        f"Analyst snapshot [{universe}]: {len(snapshot.targets)} covered, "
+        f"{len(snapshot.revisions)} with revisions, "
         f"{len(snapshot.failed)} uncovered"
     )
     return snapshot
