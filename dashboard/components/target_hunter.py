@@ -1,7 +1,9 @@
 """
-Target Hunter view: surface Nifty 50 stocks where analyst price targets are
-materially above current price, validated by a transparent technical score,
-with an independent POV on fair exit price and expected timeline.
+Target Hunter view: surface stocks where analyst price targets are materially
+above current price, validated by a transparent technical score, with a
+conviction band, an ETA-to-target bucket, and a distance-from-ATH chip filter.
+
+Universe switch covers Nifty 50, a curated Midcap subset, or both.
 """
 
 import sys
@@ -16,7 +18,8 @@ from loguru import logger
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from config.nifty50_tickers import NIFTY50_STOCKS, get_yahoo_tickers
+from config.nifty50_tickers import NIFTY50_STOCKS
+from config.midcap_tickers import MIDCAP_STOCKS
 from dashboard.analyst_data import AnalystSnapshot, load_analyst_snapshot
 from dashboard.config import (
     ANALYST_CACHE_TTL_SECONDS,
@@ -27,18 +30,70 @@ from dashboard.config import (
 )
 
 
+# Universe → stock dict
+_UNIVERSE_MAP = {
+    "Nifty 50": NIFTY50_STOCKS,
+    "Midcap": MIDCAP_STOCKS,
+}
+
+def _segmented(label, options, *, default=None, key=None, selection_mode="single"):
+    """st.segmented_control if available (Streamlit ≥1.40), else radio/multiselect."""
+    fn = getattr(st, "segmented_control", None)
+    if fn is not None:
+        try:
+            return fn(
+                label, options, default=default, key=key,
+                selection_mode=selection_mode, label_visibility="visible",
+            )
+        except TypeError:
+            return fn(label, options, default=default, key=key)
+    if selection_mode == "multi":
+        return st.multiselect(label, options, default=default or [], key=key)
+    idx = options.index(default) if default in options else 0
+    return st.radio(label, options, index=idx, horizontal=True, key=key)
+
+
+HORIZON_MONTHS = {"1M": 1, "3M": 3, "6M": 6, "12M": 12}
+DRAWDOWN_CHIPS = {"≥10%": 10.0, "≥20%": 20.0, "≥30%": 30.0}
+CONVICTION_COLORS = {
+    "High":   {"bg": "#003d2e", "fg": "#00d09c", "border": "#00a67c"},
+    "Medium": {"bg": "#3d2f00", "fg": "#ffc247", "border": "#b88a2e"},
+    "Low":    {"bg": "#3d1a1a", "fg": "#ff6b6b", "border": "#a83838"},
+}
+HORIZON_COLORS = {
+    "1M":  {"bg": "#1a2d3d", "fg": "#5eb8ff", "border": "#2f6fa8"},
+    "3M":  {"bg": "#1a2d3d", "fg": "#5eb8ff", "border": "#2f6fa8"},
+    "6M":  {"bg": "#22203d", "fg": "#9d8cff", "border": "#5a4fb8"},
+    "12M": {"bg": "#2d2038", "fg": "#c792e3", "border": "#7a4fa8"},
+}
+
+
 # ---------------------------------------------------------------------------
 # Technical scoring
 # ---------------------------------------------------------------------------
 
-@st.cache_data(ttl=ANALYST_CACHE_TTL_SECONDS, show_spinner="Loading 1-year history for technicals...")
-def _load_technical_history() -> dict:
-    """Fetch 1-year daily OHLCV for all Nifty 50 stocks. Returns dict[symbol] -> DataFrame."""
-    tickers = " ".join(get_yahoo_tickers())
+def _universe_stocks(universe: str) -> dict:
+    """Return the combined stock dict for the selected universe label."""
+    if universe == "Both":
+        merged = dict(NIFTY50_STOCKS)
+        for sym, meta in MIDCAP_STOCKS.items():
+            merged.setdefault(sym, meta)
+        return merged
+    return _UNIVERSE_MAP.get(universe, NIFTY50_STOCKS)
+
+
+@st.cache_data(ttl=ANALYST_CACHE_TTL_SECONDS, show_spinner="Loading 5-year history for technicals & ATH...")
+def _load_technical_history(universe: str = "Nifty 50") -> dict:
+    """Fetch 5-year daily OHLCV for the universe. Returns dict[symbol] -> DataFrame.
+
+    5y (vs the old 1y) lets us compute distance-from-ATH without a second fetch.
+    """
+    stocks = _universe_stocks(universe)
+    tickers = " ".join(meta[0] for meta in stocks.values())
     try:
         data = yf.download(
             tickers,
-            period="1y",
+            period="5y",
             interval="1d",
             group_by="ticker",
             auto_adjust=True,
@@ -53,7 +108,7 @@ def _load_technical_history() -> dict:
         return {}
 
     result = {}
-    for symbol, (yahoo_ticker, _, _) in NIFTY50_STOCKS.items():
+    for symbol, (yahoo_ticker, _, _) in stocks.items():
         try:
             if isinstance(data.columns, pd.MultiIndex):
                 if yahoo_ticker in data.columns.get_level_values(0):
@@ -168,6 +223,146 @@ def _compute_timeline(beta: float, tech_score: float, macd_bullish: bool, rsi: f
     return "~12 months"
 
 
+# ---------------------------------------------------------------------------
+# Conviction band + ETA bucket
+# ---------------------------------------------------------------------------
+
+def _conviction_band(
+    spread_pct: float,
+    num_analysts: int,
+    tech_score: float,
+    upside_pct: float,
+    macd_bullish: bool,
+) -> tuple[str, float]:
+    """Blend spread tightness, coverage, and tech alignment into High/Med/Low.
+
+    Returns (label, score_0_1). Score is used to rank Top Picks.
+    """
+    # Spread tightness: 0% spread → 1.0, 40%+ → 0.0
+    spread_score = max(0.0, 1.0 - (spread_pct / 40.0))
+
+    # Coverage: 0 analysts → 0.0, 20+ → 1.0
+    coverage_score = min(1.0, num_analysts / 20.0) if num_analysts else 0.0
+
+    # Technical alignment: tech_score on 0..100 and direction match
+    alignment = tech_score / 100.0
+    if upside_pct >= 0 and macd_bullish:
+        alignment = min(1.0, alignment + 0.15)
+    elif upside_pct >= 0 and not macd_bullish:
+        alignment = max(0.0, alignment - 0.15)
+
+    score = 0.45 * spread_score + 0.30 * coverage_score + 0.25 * alignment
+
+    if score >= 0.65:
+        band = "High"
+    elif score >= 0.40:
+        band = "Medium"
+    else:
+        band = "Low"
+    return band, round(score, 3)
+
+
+def _eta_months(upside_pct: float, beta: float, macd_bullish: bool, rsi: float) -> tuple[float, str]:
+    """Estimate months until target is reached, bucketed to 1M/3M/6M/12M.
+
+    Larger required move → longer. Bullish momentum + higher beta shortens.
+    Overbought (RSI > 70) stretches the ETA.
+    """
+    magnitude = abs(upside_pct)
+    base = float(np.clip(magnitude / 3.0, 1.0, 12.0))  # 3% → 1M, 36%+ → 12M
+
+    base *= 0.75 if macd_bullish else 1.25
+    base /= float(np.clip(beta, 0.5, 2.0))
+    if not np.isnan(rsi):
+        if upside_pct >= 0 and rsi > 70:
+            base *= 1.15
+        elif upside_pct >= 0 and rsi < 35:
+            base *= 0.85
+
+    eta = float(np.clip(base, 0.5, 24.0))
+
+    if eta <= 1.5:
+        bucket = "1M"
+    elif eta <= 3.5:
+        bucket = "3M"
+    elif eta <= 6.5:
+        bucket = "6M"
+    else:
+        bucket = "12M"
+    return round(eta, 1), bucket
+
+
+def _scale_to_horizon(current: float, target_mean: float, eta_m: float, horizon: str) -> float:
+    """Pro-rate the target for a user-selected horizon.
+
+    If full target ETA is 9 months and user picks a 3M horizon, show the
+    interim price the stock should reach at 3/9 of the way there.
+    """
+    if current <= 0 or target_mean <= 0 or eta_m <= 0:
+        return 0.0
+    horizon_m = HORIZON_MONTHS.get(horizon, 12)
+    ratio = min(1.0, horizon_m / eta_m)
+    return current + (target_mean - current) * ratio
+
+
+# ---------------------------------------------------------------------------
+# Chip / badge HTML helpers
+# ---------------------------------------------------------------------------
+
+def _badge_html(label: str, palette: dict) -> str:
+    """Inline colored chip for use inside st.markdown (unsafe_allow_html=True)."""
+    return (
+        f'<span style="display:inline-block;padding:2px 10px;border-radius:999px;'
+        f'font-size:0.72rem;font-weight:600;letter-spacing:0.02em;'
+        f'background:{palette["bg"]};color:{palette["fg"]};'
+        f'border:1px solid {palette["border"]};">{label}</span>'
+    )
+
+
+def _conviction_badge(band: str) -> str:
+    return _badge_html(band, CONVICTION_COLORS[band])
+
+
+def _horizon_badge(bucket: str) -> str:
+    return _badge_html(bucket, HORIZON_COLORS.get(bucket, HORIZON_COLORS["12M"]))
+
+
+_CHIP_BAR_CSS = """
+<style>
+.chip-bar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 10px 12px; border: 1px solid #232834; border-radius: 10px;
+    background: #0f131c; margin: 8px 0 14px 0;
+}
+.chip-bar .chip-label {
+    font-size: 0.72rem; color: #7a8294; text-transform: uppercase;
+    letter-spacing: 0.06em; margin-right: 2px; font-weight: 600;
+}
+.chip-bar [data-testid="stSegmentedControl"] button {
+    font-size: 0.8rem !important; padding: 4px 12px !important;
+}
+.top-picks-grid {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px; margin: 10px 0 18px 0;
+}
+.top-pick-card {
+    background: linear-gradient(180deg, #141924 0%, #0f131c 100%);
+    border: 1px solid #232834; border-radius: 12px; padding: 14px 16px;
+}
+.top-pick-card:hover { border-color: #00a67c; }
+.top-pick-card .tp-symbol { font-size: 1.05rem; font-weight: 700; color: #e8ecf1; }
+.top-pick-card .tp-company { font-size: 0.78rem; color: #7a8294; margin-bottom: 8px; }
+.top-pick-card .tp-upside { font-size: 1.4rem; font-weight: 700; color: #00d09c; margin: 4px 0; }
+.top-pick-card .tp-meta { font-size: 0.78rem; color: #c9cfd9; margin-top: 6px; }
+.active-filters { font-size: 0.78rem; color: #7a8294; margin: 4px 0 8px 0; }
+.active-filters .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 6px;
+    background: #1a1f2b; color: #c9cfd9; margin-right: 6px; font-size: 0.72rem;
+}
+</style>
+"""
+
+
 def _risk_flags(num_analysts: int, rsi: float, high: float, low: float, mean: float) -> list:
     flags = []
     if num_analysts < TARGET_HUNTER_MIN_ANALYSTS:
@@ -180,30 +375,118 @@ def _risk_flags(num_analysts: int, rsi: float, high: float, low: float, mean: fl
 
 
 # ---------------------------------------------------------------------------
+# Table renderer with colored badges
+# ---------------------------------------------------------------------------
+
+_TABLE_CSS = """
+<style>
+.th-table {
+    width: 100%; border-collapse: collapse; font-size: 0.82rem;
+    background: #0f131c; border: 1px solid #232834; border-radius: 10px;
+    overflow: hidden; margin: 8px 0 16px 0;
+}
+.th-table th {
+    text-align: left; padding: 10px 12px; font-weight: 600;
+    color: #c9cfd9; background: #151922; border-bottom: 1px solid #232834;
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.th-table td {
+    padding: 10px 12px; border-bottom: 1px solid #1a1f2b; color: #c9cfd9;
+}
+.th-table tr:hover td { background: #141924; }
+.th-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.th-table .pos { color: #00d09c; font-weight: 600; }
+.th-table .neg { color: #ff6b6b; font-weight: 600; }
+</style>
+"""
+
+
+def _build_table_html(df: pd.DataFrame, horizon: str) -> str:
+    """Render the candidates table with inline colored conviction + ETA badges."""
+    rows_html = []
+    for _, r in df.iterrows():
+        upside_cls = "pos" if r["Upside %"] >= 0 else "neg"
+        dd_cls = "neg" if r["Drawdown %"] >= 20 else ""
+        rows_html.append(
+            f'<tr>'
+            f'<td><b>{r["Symbol"]}</b><div style="font-size:0.72rem;color:#7a8294;">{r["Company"]}</div></td>'
+            f'<td>{r["Sector"]}</td>'
+            f'<td style="font-size:0.72rem;color:#7a8294;">{r["Universe"]}</td>'
+            f'<td class="num">₹{r["Current"]:,.0f}</td>'
+            f'<td class="num">₹{r["Mean Target"]:,.0f}</td>'
+            f'<td class="num">₹{r["Horizon Target"]:,.0f}</td>'
+            f'<td class="num {upside_cls}">{r["Upside %"]:+.1f}%</td>'
+            f'<td>{_conviction_badge(r["Conviction"])}</td>'
+            f'<td>{_horizon_badge(r["ETA"])}</td>'
+            f'<td class="num {dd_cls}">{r["Drawdown %"]:.1f}%</td>'
+            f'<td class="num">{int(r["Analysts"])}</td>'
+            f'<td class="num">{int(r["Tech Score"])}</td>'
+            f'</tr>'
+        )
+    return (
+        _TABLE_CSS
+        + '<table class="th-table"><thead><tr>'
+        + '<th>Stock</th><th>Sector</th><th>Set</th>'
+        + '<th class="num">Now</th><th class="num">Target</th>'
+        + f'<th class="num">{horizon} Target</th>'
+        + '<th class="num">Upside</th>'
+        + '<th>Conviction</th><th>ETA</th>'
+        + '<th class="num">Off ATH</th><th class="num">Analysts</th><th class="num">Tech</th>'
+        + '</tr></thead><tbody>'
+        + "".join(rows_html)
+        + "</tbody></table>"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Render
 # ---------------------------------------------------------------------------
 
 def render_target_hunter():
     """Main entry: render the Target Hunter view."""
+    st.markdown(_CHIP_BAR_CSS, unsafe_allow_html=True)
     st.title("Target Hunter — Analyst Upside Finder")
     st.caption(
-        "Nifty 50 stocks where the analyst mean target sits materially above the current price, "
-        "validated against a transparent 6-factor technical score. "
-        "Fair exit = blend of analyst mean and our technical confidence, capped at analyst high."
+        "Stocks where the analyst mean target sits materially above the current price, "
+        "validated against a transparent 6-factor technical score. Toggle the chips to shard "
+        "the basis by conviction, expected horizon, and distance from all-time high."
     )
 
-    analyst = load_analyst_snapshot()
-    tech_history = _load_technical_history()
-
-    if not analyst.targets:
-        st.warning(
-            "No analyst coverage returned from Yahoo Finance. "
-            "This can happen on weekends, during Yahoo API hiccups, or if the cache is empty. "
-            "Try Refresh Data in the sidebar."
+    # --- Chip bar: universe / conviction / horizon / ATH drawdown / clear ---
+    st.markdown('<div class="chip-label">Filters</div>', unsafe_allow_html=True)
+    chip_cols = st.columns([1.2, 1.4, 1.4, 1.4, 0.8])
+    with chip_cols[0]:
+        universe = _segmented(
+            "Universe", ["Nifty 50", "Midcap", "Both"],
+            default=st.session_state.get("th_universe", "Nifty 50"),
+            key="th_universe",
+        ) or "Nifty 50"
+    with chip_cols[1]:
+        conviction_pick = _segmented(
+            "Conviction", ["High", "Medium", "Low"],
+            default=st.session_state.get("th_conviction"),
+            selection_mode="multi",
+            key="th_conviction",
+        ) or []
+    with chip_cols[2]:
+        horizon = _segmented(
+            "Horizon", ["1M", "3M", "6M", "12M"],
+            default=st.session_state.get("th_horizon", "12M"),
+            key="th_horizon",
+        ) or "12M"
+    with chip_cols[3]:
+        drawdown_pick = _segmented(
+            "Down from ATH", list(DRAWDOWN_CHIPS.keys()),
+            default=st.session_state.get("th_drawdown"),
+            key="th_drawdown",
         )
-        return
+    with chip_cols[4]:
+        if st.button("Clear all", use_container_width=True, key="th_clear"):
+            for k in ("th_conviction", "th_drawdown", "th_universe", "th_horizon"):
+                st.session_state.pop(k, None)
+            st.rerun()
 
-    # --- Sidebar filters ---
+    # --- Sidebar min-bar filters (kept from original, still useful) ---
     st.sidebar.subheader("Target Hunter filters")
     min_upside = st.sidebar.slider(
         "Min upside (%)", 0, 50,
@@ -215,6 +498,20 @@ def render_target_hunter():
     min_tech_score = st.sidebar.slider(
         "Min technical score", 0, 100, TARGET_HUNTER_TECH_SCORE_THRESHOLD, step=10,
     )
+
+    # --- Load data for the selected universe ---
+    analyst = load_analyst_snapshot(universe=universe)
+    tech_history = _load_technical_history(universe=universe)
+
+    if not analyst.targets:
+        st.warning(
+            "No analyst coverage returned from Yahoo Finance. "
+            "This can happen on weekends, during Yahoo API hiccups, or if the cache is empty. "
+            "Try Refresh Data in the sidebar."
+        )
+        return
+
+    stocks_meta = _universe_stocks(universe)
 
     # --- Build rows ---
     rows = []
@@ -231,6 +528,10 @@ def render_target_hunter():
             continue
 
         upside = (target_mean - current) / current
+        spread_pct = (
+            (target_high - target_low) / target_mean * 100
+            if target_mean and target_high and target_low else 100.0
+        )
 
         tech = _technical_breakdown(tech_history.get(symbol))
         tech_score = tech.get("score", 0.0)
@@ -238,25 +539,44 @@ def render_target_hunter():
         macd_bullish = tech.get("signals", {}).get("macd_bullish", False)
         beta = t.get("beta") or 1.0
 
+        conviction, c_score = _conviction_band(
+            spread_pct, num_analysts, tech_score, upside * 100, macd_bullish,
+        )
+        eta_m, eta_bucket = _eta_months(upside * 100, beta, macd_bullish, rsi)
+        horizon_target = _scale_to_horizon(current, target_mean, eta_m, horizon)
+
+        ath = t.get("ath") or 0.0
+        drawdown_pct = t.get("drawdown_pct") or 0.0
+
         fair_exit = _compute_fair_exit(current, target_mean, target_high, tech_score)
-        timeline = _compute_timeline(beta, tech_score, macd_bullish, rsi)
+        timeline_str = _compute_timeline(beta, tech_score, macd_bullish, rsi)
         flags = _risk_flags(num_analysts, rsi, target_high, target_low, target_mean)
 
-        _, company, sector = NIFTY50_STOCKS[symbol]
+        meta = stocks_meta.get(symbol, (None, symbol, "Unknown"))
+        company, sector = meta[1], meta[2]
+        uni_label = t.get("universe") or ("Midcap" if symbol in MIDCAP_STOCKS and symbol not in NIFTY50_STOCKS else "Nifty 50")
 
         row = {
             "Symbol": symbol,
             "Company": company,
             "Sector": sector,
+            "Universe": uni_label,
             "Current": current,
             "Mean Target": target_mean,
             "High Target": target_high,
             "Upside %": round(upside * 100, 2),
+            "Horizon Target": round(horizon_target, 2),
             "Analysts": num_analysts,
             "Rec": (t.get("recommendationKey") or "").replace("_", " ").title() or "—",
             "Tech Score": round(tech_score, 0),
             "Fair Exit": round(fair_exit, 2),
-            "Timeline": timeline,
+            "Conviction": conviction,
+            "Conviction Score": c_score,
+            "ETA": eta_bucket,
+            "ETA (months)": eta_m,
+            "Timeline": timeline_str,
+            "ATH": round(ath, 2),
+            "Drawdown %": round(drawdown_pct, 2),
             "Flags": ", ".join(flags) if flags else "",
         }
         rows.append(row)
@@ -268,35 +588,70 @@ def render_target_hunter():
 
     df = pd.DataFrame(rows)
 
-    # Apply filters
-    filtered = df[
-        (df["Upside %"] >= min_upside * 100)
-        & (df["Analysts"] >= min_analysts)
-        & (df["Tech Score"] >= min_tech_score)
-    ].sort_values("Upside %", ascending=False)
+    # --- Apply chip filters + sidebar min-bars ---
+    filtered = df.copy()
+    filtered = filtered[
+        (filtered["Upside %"] >= min_upside * 100)
+        & (filtered["Analysts"] >= min_analysts)
+        & (filtered["Tech Score"] >= min_tech_score)
+    ]
+    if conviction_pick:
+        filtered = filtered[filtered["Conviction"].isin(conviction_pick)]
+    # Horizon chip: only keep stocks whose ETA ≤ selected horizon
+    horizon_m_cap = HORIZON_MONTHS.get(horizon, 12)
+    filtered = filtered[filtered["ETA (months)"] <= horizon_m_cap + 0.01]
+    if drawdown_pick:
+        filtered = filtered[filtered["Drawdown %"] >= DRAWDOWN_CHIPS[drawdown_pick]]
 
+    filtered = filtered.sort_values("Conviction Score", ascending=False)
+
+    # --- Active filter summary ---
+    active_pills = [f'<span class="pill">Universe: {universe}</span>',
+                    f'<span class="pill">Horizon ≤ {horizon}</span>']
+    if conviction_pick:
+        active_pills.append(f'<span class="pill">Conviction: {", ".join(conviction_pick)}</span>')
+    if drawdown_pick:
+        active_pills.append(f'<span class="pill">ATH drop {drawdown_pick}</span>')
     st.markdown(
-        f"**{len(filtered)} of {len(df)} Nifty 50 stocks** match your filters "
-        f"(upside ≥ {int(min_upside*100)}%, analysts ≥ {min_analysts}, tech ≥ {min_tech_score})."
+        f'<div class="active-filters">{" ".join(active_pills)}'
+        f'<span style="margin-left:8px;">· {len(filtered)} of {len(df)} names match</span></div>',
+        unsafe_allow_html=True,
     )
 
     if filtered.empty:
-        st.info("Loosen the filters to see more candidates.")
+        st.info("No candidates match these chips — relax the universe, horizon, or ATH drop.")
         return
 
-    st.dataframe(
-        filtered,
-        column_config={
-            "Current": st.column_config.NumberColumn(format="%.2f"),
-            "Mean Target": st.column_config.NumberColumn(format="%.2f"),
-            "High Target": st.column_config.NumberColumn(format="%.2f"),
-            "Upside %": st.column_config.NumberColumn(format="%.2f%%"),
-            "Fair Exit": st.column_config.NumberColumn(format="%.2f"),
-            "Tech Score": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d"),
-        },
-        use_container_width=True,
-        hide_index=True,
-    )
+    # --- Top Picks card grid (3 highest conviction scores) ---
+    st.subheader("Top picks")
+    top3 = filtered.head(3)
+    cards_html = '<div class="top-picks-grid">'
+    for _, r in top3.iterrows():
+        conv_badge = _conviction_badge(r["Conviction"])
+        eta_badge = _horizon_badge(r["ETA"])
+        upside_color = "#00d09c" if r["Upside %"] >= 0 else "#ff6b6b"
+        cards_html += (
+            f'<div class="top-pick-card">'
+            f'  <div style="display:flex;justify-content:space-between;align-items:center;">'
+            f'    <div>'
+            f'      <div class="tp-symbol">{r["Symbol"]}</div>'
+            f'      <div class="tp-company">{r["Company"]} · {r["Sector"]}</div>'
+            f'    </div>'
+            f'    <div style="display:flex;gap:4px;">{conv_badge}{eta_badge}</div>'
+            f'  </div>'
+            f'  <div class="tp-upside" style="color:{upside_color};">{r["Upside %"]:+.1f}%</div>'
+            f'  <div class="tp-meta">Now ₹{r["Current"]:,.0f} → Target ₹{r["Mean Target"]:,.0f}</div>'
+            f'  <div class="tp-meta">{horizon} view: ₹{r["Horizon Target"]:,.0f} · '
+            f'    {int(r["Analysts"])} analysts · {r["Drawdown %"]:.0f}% off ATH</div>'
+            f'</div>'
+        )
+    cards_html += "</div>"
+    st.markdown(cards_html, unsafe_allow_html=True)
+
+    # --- Main table with colored conviction + ETA badges (HTML render) ---
+    st.subheader("All candidates")
+    table_html = _build_table_html(filtered, horizon)
+    st.markdown(table_html, unsafe_allow_html=True)
 
     st.divider()
     st.subheader("Deep dive")
@@ -308,8 +663,8 @@ def render_target_hunter():
         row = filtered[filtered["Symbol"] == symbol].iloc[0]
 
         header = (
-            f"**{symbol}** — {row['Company']} ・ Upside "
-            f"{row['Upside %']:+.1f}% ・ Tech {int(row['Tech Score'])} ・ Fair Exit ₹{row['Fair Exit']:,.2f}"
+            f"**{symbol}** — {row['Company']} ・ {row['Conviction']} conviction ・ ETA {row['ETA']} ・ "
+            f"Upside {row['Upside %']:+.1f}% ・ {row['Drawdown %']:.0f}% off ATH ・ Fair Exit ₹{row['Fair Exit']:,.2f}"
         )
         with st.expander(header):
             c1, c2 = st.columns([3, 2])
@@ -325,16 +680,21 @@ def render_target_hunter():
                 else:
                     st.caption("No recent revisions in the last 90 days.")
 
-                # Analyst target spread
+                # Analyst target spread + ATH context
                 st.markdown("**Analyst target spread**")
                 spread_df = pd.DataFrame({
-                    "Metric": ["Current", "Low", "Mean", "Median", "High", "Fair Exit (ours)"],
+                    "Metric": [
+                        "5y ATH", "Current", "Low", "Mean", "Median", "High",
+                        f"{st.session_state.get('th_horizon', '12M')} Interim", "Fair Exit (ours)",
+                    ],
                     "Price": [
+                        t.get("ath") or 0,
                         t.get("currentPrice") or 0,
                         t.get("targetLowPrice") or 0,
                         t.get("targetMeanPrice") or 0,
                         t.get("targetMedianPrice") or 0,
                         t.get("targetHighPrice") or 0,
+                        row["Horizon Target"],
                         row["Fair Exit"],
                     ],
                 })
