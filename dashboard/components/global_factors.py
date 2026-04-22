@@ -8,20 +8,167 @@ from dashboard.config import SECTOR_SUPPLY_CHAIN, SECTOR_INDEX_TO_SECTOR
 
 
 def render_global_indices(snapshot: MarketSnapshot):
-    """Render global index metric cards."""
+    """Render global index cards — price, DoD %, WoW %, and a sparkline.
+
+    Each card is a self-contained HTML block so the grid stays tight and the
+    UI keeps working even when a card is missing. Sparklines are inline SVG
+    polylines drawn from the last ~10 closes of each index.
+    """
     st.markdown("#### Global Indices")
 
     if not snapshot.global_indices:
         st.info("Global index data unavailable")
         return
 
-    indices = list(snapshot.global_indices.items())
-    cols = st.columns(len(indices))
+    st.markdown(_INDICES_CSS, unsafe_allow_html=True)
 
-    for col, (name, data) in zip(cols, indices):
-        with col:
-            ret = data.get("ret_pct", 0)
-            st.metric(name, f"{ret:+.2f}%")
+    cards_html = []
+    for name, data in snapshot.global_indices.items():
+        close = data.get("close")
+        dod = data.get("ret_pct")
+        wow = data.get("wow_pct")
+        spark = data.get("spark") or []
+
+        if close is None or dod is None:
+            continue
+
+        cards_html.append(_index_card_html(name, close, dod, wow, spark))
+
+    if not cards_html:
+        st.info("Global index data unavailable")
+        return
+
+    st.markdown(
+        f"<div class='idx-grid'>{''.join(cards_html)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+_INDICES_CSS = """
+<style>
+.idx-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+    margin-top: 6px;
+}
+.idx-card {
+    background: #11151d;
+    border: 1px solid #1f2633;
+    border-radius: 12px;
+    padding: 0.85rem 1rem 0.9rem;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.idx-card:hover { border-color: #2f3a4d; transform: translateY(-1px); }
+.idx-card .name {
+    color: #7a8294;
+    font-size: 0.66rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+.idx-card .row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.4rem;
+}
+.idx-card .price {
+    color: #e8ecf1;
+    font-size: 1.15rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+}
+.idx-card .dod {
+    font-size: 0.82rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.idx-card .dod.pos { color: #00d09c; }
+.idx-card .dod.neg { color: #ef5350; }
+.idx-card .dod.flat { color: #8a92a0; }
+.idx-card .foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+.idx-card .wow {
+    color: #7a8294;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+}
+.idx-card .wow .val.pos { color: #00d09c; }
+.idx-card .wow .val.neg { color: #ef5350; }
+.idx-card svg.spark {
+    display: block;
+    overflow: visible;
+}
+</style>
+"""
+
+
+def _index_card_html(name: str, close: float, dod: float, wow: float | None,
+                     spark: list[float]) -> str:
+    """Render one global-index card as a self-contained HTML block."""
+    if dod > 0.02:
+        dod_cls, dod_colour = "pos", "#00d09c"
+    elif dod < -0.02:
+        dod_cls, dod_colour = "neg", "#ef5350"
+    else:
+        dod_cls, dod_colour = "flat", "#8a92a0"
+
+    spark_svg = _sparkline_svg(spark, stroke=dod_colour) if spark else ""
+
+    wow_html = ""
+    if wow is not None:
+        w_cls = "pos" if wow > 0.02 else "neg" if wow < -0.02 else ""
+        w_sign = "+" if wow > 0 else ""
+        wow_html = (
+            f"<span class='wow'>WoW "
+            f"<span class='val {w_cls}'>{w_sign}{wow:.2f}%</span></span>"
+        )
+
+    dod_sign = "+" if dod > 0 else ""
+    return (
+        f"<div class='idx-card'>"
+        f"<div class='name'>{name}</div>"
+        f"<div class='row'>"
+        f"<span class='price'>{close:,.2f}</span>"
+        f"<span class='dod {dod_cls}'>{dod_sign}{dod:.2f}%</span>"
+        f"</div>"
+        f"<div class='foot'>{wow_html}{spark_svg}</div>"
+        f"</div>"
+    )
+
+
+def _sparkline_svg(points: list[float], width: int = 72, height: int = 22,
+                   stroke: str = "#00d09c") -> str:
+    """Inline SVG polyline sparkline from a series of closes."""
+    if len(points) < 2:
+        return ""
+    lo = min(points)
+    hi = max(points)
+    span = hi - lo or 1.0
+    step = width / (len(points) - 1)
+    coords = []
+    for i, v in enumerate(points):
+        x = i * step
+        # Higher value = lower y in SVG coords; pad 2px top/bottom.
+        y = height - 2 - ((v - lo) / span) * (height - 4)
+        coords.append(f"{x:.1f},{y:.1f}")
+    poly = " ".join(coords)
+    return (
+        f"<svg class='spark' width='{width}' height='{height}' "
+        f"viewBox='0 0 {width} {height}'>"
+        f"<polyline fill='none' stroke='{stroke}' stroke-width='1.5' "
+        f"stroke-linecap='round' stroke-linejoin='round' points='{poly}'/>"
+        f"</svg>"
+    )
 
 
 def render_supply_chain(snapshot: MarketSnapshot):

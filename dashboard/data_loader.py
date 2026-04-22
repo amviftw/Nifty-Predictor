@@ -22,7 +22,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config.nifty50_tickers import NIFTY50_STOCKS, GLOBAL_INDICES, get_yahoo_tickers
 from config.holidays import is_trading_day, prev_trading_day, days_to_expiry, next_fno_expiry
 from data.sources.yahoo_fetcher import YahooFetcher
-from data.sources.global_fetcher import GlobalFetcher
 from data.sources.nse_fetcher import NSEFetcher
 from dashboard.config import (
     SECTORAL_INDICES,
@@ -220,26 +219,39 @@ def _populate_macro_data(snapshot: MarketSnapshot, period: str):
     _fetch_india_vix(snapshot, period)
     _fetch_usdinr(snapshot, period)
 
-    # --- Global indices: batch fetch (nice-to-have, failures are tolerable) ---
-    try:
-        gf = GlobalFetcher(max_retries=2, retry_delay=1.0)
-        records = gf.fetch_recent_indices(period=period)
-        if records:
-            latest = records[-1]
-            from dashboard.config import GLOBAL_INDEX_DISPLAY
-            for key, display_name in GLOBAL_INDEX_DISPLAY.items():
-                ret_key = f"{key.lower()}_ret"
-                ret_val = latest.get(ret_key)
-                snapshot.global_indices[display_name] = {
-                    "ret_pct": round((ret_val or 0) * 100, 2),
-                }
-    except Exception as e:
-        logger.warning(f"Global indices batch fetch failed: {e}")
+    # --- Global indices: fetch individually for reliable price + DoD + WoW + sparkline.
+    # Batch yfinance calls silently drop some international indices, and we need
+    # rich per-index data (close, DoD %, WoW %, last-N-day sparkline).
+    from dashboard.config import GLOBAL_INDEX_DISPLAY
+    from config.nifty50_tickers import GLOBAL_INDICES
+    for key, display_name in GLOBAL_INDEX_DISPLAY.items():
+        ticker = GLOBAL_INDICES.get(key)
+        if not ticker:
+            continue
+        closes = _fetch_single_ticker(ticker, period)
+        if len(closes) < 2:
+            continue
+        latest = float(closes.iloc[-1])
+        prev = float(closes.iloc[-2])
+        dod_pct = ((latest - prev) / prev) * 100 if prev else 0.0
+        wow_pct = 0.0
+        if len(closes) >= 6:
+            week_ago = float(closes.iloc[-6])
+            if week_ago:
+                wow_pct = ((latest - week_ago) / week_ago) * 100
+        # Trailing series for sparkline (last ~10 points)
+        spark = closes.tail(10).reset_index(drop=True).tolist()
+        snapshot.global_indices[display_name] = {
+            "close": round(latest, 2),
+            "ret_pct": round(dod_pct, 2),
+            "wow_pct": round(wow_pct, 2),
+            "spark": [float(v) for v in spark],
+        }
 
-    # --- FII/DII ---
+    # --- FII/DII --- fetch ~30 days so we can compute WoW and MoM aggregates.
     try:
         nf = NSEFetcher(max_retries=2, retry_delay=1.0)
-        fii_dii = nf.fetch_recent_fii_dii(lookback_days=10)
+        fii_dii = nf.fetch_recent_fii_dii(lookback_days=30)
         if fii_dii:
             snapshot.fii_dii_series = fii_dii
             latest_fii = fii_dii[-1]

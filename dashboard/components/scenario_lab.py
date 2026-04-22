@@ -30,72 +30,162 @@ from config.nifty50_tickers import NIFTY50_STOCKS
 # Styling
 # -----------------------------------------------------------------------------
 
+
+# Category palette — one accent colour per driver family. Gives the cards a
+# sense of "these live in the same world" rather than looking identical.
+_CATEGORY_PALETTE = {
+    "Commodity":        {"accent": "#f59e0b", "soft": "rgba(245,158,11,0.12)",  "ring": "rgba(245,158,11,0.30)"},
+    "Currency":         {"accent": "#a855f7", "soft": "rgba(168,85,247,0.12)",  "ring": "rgba(168,85,247,0.30)"},
+    "Yield":            {"accent": "#06b6d4", "soft": "rgba(6,182,212,0.12)",   "ring": "rgba(6,182,212,0.30)"},
+    "Volatility":       {"accent": "#ef4444", "soft": "rgba(239,68,68,0.12)",   "ring": "rgba(239,68,68,0.30)"},
+    "Equity Overnight": {"accent": "#10b981", "soft": "rgba(16,185,129,0.12)",  "ring": "rgba(16,185,129,0.30)"},
+    "Flow":             {"accent": "#3b82f6", "soft": "rgba(59,130,246,0.12)",  "ring": "rgba(59,130,246,0.30)"},
+}
+_DEFAULT_PALETTE = {"accent": "#64748b", "soft": "rgba(100,116,139,0.12)", "ring": "rgba(100,116,139,0.30)"}
+
+
+def _palette(category: str) -> dict:
+    return _CATEGORY_PALETTE.get(category, _DEFAULT_PALETTE)
+
+
 _LAB_CSS = """
 <style>
+/* Soft, narrative driver card — less "flashcard", more "explainer". */
 .driver-card {
-    background: linear-gradient(145deg, #1a1d2a 0%, #14161e 100%);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px;
-    padding: 1.1rem 1.2rem;
+    background: #11151d;
+    border: 1px solid #1f2633;
+    border-radius: 14px;
+    padding: 1.15rem 1.25rem 1rem;
     margin-bottom: 0.6rem;
     height: 100%;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s ease, transform 0.2s ease;
 }
-.driver-card h4 {
-    margin: 0 0 0.3rem 0;
-    color: #e0e3ec;
-    font-size: 1.02rem;
+.driver-card:hover {
+    border-color: #2f3a4d;
+    transform: translateY(-1px);
 }
-.driver-card .cat {
-    display: inline-block;
-    background: rgba(63, 81, 181, 0.18);
-    color: #8ea7ff;
-    font-size: 0.68rem;
-    padding: 0.12rem 0.55rem;
-    border-radius: 10px;
-    margin-bottom: 0.5rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+/* Thin accent rail on the left, tinted by category. */
+.driver-card::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--accent, #64748b);
 }
-.driver-card .what {
-    color: #a6adbb;
-    font-size: 0.85rem;
-    margin-bottom: 0.6rem;
-    line-height: 1.4;
-}
-.driver-card .why {
-    color: #d7dce4;
-    font-size: 0.82rem;
-    line-height: 1.45;
-    border-left: 2px solid #3f51b5;
-    padding-left: 0.7rem;
-    margin-bottom: 0.7rem;
-}
-.driver-card .affected {
-    font-size: 0.78rem;
-    color: #97a0ae;
-    margin-bottom: 0.3rem;
-}
-.driver-card .affected .plus { color: #26a69a; font-weight: 600; }
-.driver-card .affected .minus { color: #ef5350; font-weight: 600; }
-.driver-card .example {
-    background: rgba(255, 193, 7, 0.07);
-    border-left: 2px solid #ffa726;
-    padding: 0.55rem 0.7rem;
-    border-radius: 0 6px 6px 0;
-    color: #e0c890;
-    font-size: 0.78rem;
-    margin-top: 0.5rem;
-    line-height: 1.45;
-}
-.idea-card {
-    background: #14161e;
-    border: 1px solid rgba(255,255,255,0.06);
-    border-left-width: 3px;
-    border-radius: 8px;
-    padding: 0.8rem 1rem;
+.driver-card .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
     margin-bottom: 0.55rem;
 }
-.idea-card.long  { border-left-color: #26a69a; }
+.driver-card h4 {
+    margin: 0;
+    color: #e8ecf1;
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+.driver-card .cat {
+    background: var(--soft);
+    color: var(--accent);
+    font-size: 0.64rem;
+    padding: 0.18rem 0.6rem;
+    border-radius: 999px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+    border: 1px solid var(--ring);
+    white-space: nowrap;
+}
+.driver-card .what {
+    color: #9aa3b2;
+    font-size: 0.84rem;
+    margin-bottom: 0.6rem;
+    line-height: 1.5;
+}
+.driver-card .why {
+    color: #c9cfd9;
+    font-size: 0.82rem;
+    line-height: 1.55;
+    background: rgba(255,255,255,0.02);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.6rem;
+}
+.driver-card .why b { color: #e8ecf1; }
+.driver-card .affected {
+    font-size: 0.76rem;
+    color: #8c95a4;
+    line-height: 1.65;
+    margin-bottom: 0.35rem;
+}
+.driver-card .affected .plus  { color: #00d09c; font-weight: 600; }
+.driver-card .affected .minus { color: #ef5350; font-weight: 600; }
+.driver-card .example {
+    background: rgba(245,158,11,0.06);
+    border-left: 2px solid rgba(245,158,11,0.55);
+    padding: 0.55rem 0.75rem;
+    border-radius: 0 8px 8px 0;
+    color: #d6c08e;
+    font-size: 0.76rem;
+    margin-top: 0.55rem;
+    line-height: 1.55;
+}
+
+/* Shock chip — premium slider header used inside the Builder. */
+.shock-chip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 0.7rem 0.35rem;
+    background: #11151d;
+    border: 1px solid #1f2633;
+    border-radius: 10px;
+    margin-top: 0.15rem;
+}
+.shock-chip .dot {
+    width: 8px; height: 8px;
+    border-radius: 999px;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--soft);
+    flex: 0 0 auto;
+}
+.shock-chip .name {
+    color: #e0e3ec;
+    font-size: 0.82rem;
+    font-weight: 600;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.shock-chip .unit {
+    color: #6b7587;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+.shock-chip .value {
+    color: var(--accent);
+    font-size: 0.85rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Trade-idea cards stay clean; slight upgrade on typography. */
+.idea-card {
+    background: #11151d;
+    border: 1px solid #1f2633;
+    border-left-width: 3px;
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    margin-bottom: 0.55rem;
+}
+.idea-card.long  { border-left-color: #00d09c; }
 .idea-card.short { border-left-color: #ef5350; }
 .idea-card .ticker-row {
     display: flex;
@@ -106,36 +196,103 @@ _LAB_CSS = """
 .idea-card .ticker {
     font-size: 1rem;
     font-weight: 700;
-    color: #e0e3ec;
+    color: #e8ecf1;
+    letter-spacing: -0.01em;
 }
 .idea-card .move {
     font-size: 0.95rem;
     font-weight: 700;
+    font-variant-numeric: tabular-nums;
 }
-.idea-card .move.up  { color: #26a69a; }
+.idea-card .move.up   { color: #00d09c; }
 .idea-card .move.down { color: #ef5350; }
 .idea-card .meta {
     color: #8a92a0;
-    font-size: 0.76rem;
+    font-size: 0.74rem;
     margin-bottom: 0.35rem;
 }
 .idea-card .hypothesis {
     color: #c8cdd6;
-    font-size: 0.81rem;
-    line-height: 1.45;
-}
-.idea-card .conf-HIGH   { background: rgba(38,166,154,0.18); color: #66d3c4; padding: 1px 7px; border-radius: 8px; font-size: 0.68rem; }
-.idea-card .conf-MEDIUM { background: rgba(255,167,38,0.18); color: #ffcf87; padding: 1px 7px; border-radius: 8px; font-size: 0.68rem; }
-.idea-card .conf-LOW    { background: rgba(120,144,156,0.18); color: #a6b0bf; padding: 1px 7px; border-radius: 8px; font-size: 0.68rem; }
-.lab-banner {
-    background: linear-gradient(90deg, rgba(26,35,126,0.25), rgba(63,81,181,0.10));
-    border-left: 3px solid #3f51b5;
-    padding: 0.7rem 1rem;
-    border-radius: 0 8px 8px 0;
-    margin-bottom: 1rem;
-    color: #cbd2dd;
-    font-size: 0.86rem;
+    font-size: 0.8rem;
     line-height: 1.5;
+}
+.idea-card .conf-HIGH   { background: rgba(0,208,156,0.18);  color: #66d3c4; padding: 1px 7px; border-radius: 999px; font-size: 0.66rem; font-weight: 600; }
+.idea-card .conf-MEDIUM { background: rgba(245,158,11,0.18); color: #ffcf87; padding: 1px 7px; border-radius: 999px; font-size: 0.66rem; font-weight: 600; }
+.idea-card .conf-LOW    { background: rgba(120,144,156,0.18); color: #a6b0bf; padding: 1px 7px; border-radius: 999px; font-size: 0.66rem; font-weight: 600; }
+
+/* Intro banner — conversational, not clinical. */
+.lab-banner {
+    background: linear-gradient(135deg, rgba(0,208,156,0.08) 0%, rgba(59,130,246,0.08) 100%);
+    border: 1px solid rgba(0,208,156,0.18);
+    padding: 0.9rem 1.1rem;
+    border-radius: 12px;
+    margin-bottom: 1rem;
+    color: #c9cfd9;
+    font-size: 0.86rem;
+    line-height: 1.6;
+}
+.lab-banner b { color: #e8ecf1; }
+.lab-banner .step {
+    color: #00d09c;
+    font-weight: 700;
+    margin-right: 0.25rem;
+}
+
+/* How-we-do-it methodology callout. */
+.method-note {
+    background: #0f131c;
+    border: 1px dashed #2a3142;
+    border-radius: 10px;
+    padding: 0.8rem 1rem;
+    color: #9aa3b2;
+    font-size: 0.78rem;
+    line-height: 1.55;
+    margin-top: 0.6rem;
+}
+.method-note b { color: #c9cfd9; }
+.method-note .tag {
+    display: inline-block;
+    background: rgba(0,208,156,0.10);
+    color: #00d09c;
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-weight: 700;
+    margin-right: 0.4rem;
+    vertical-align: middle;
+}
+
+/* Slider — tint the knob by the currently-selected driver category.
+   We can't per-slider theme from Streamlit, so keep the global brand accent. */
+.scenario-form [data-testid="stSlider"] [data-baseweb="slider"] > div > div {
+    background: linear-gradient(90deg, #1f2633, #00d09c) !important;
+}
+.scenario-form [data-testid="stSlider"] [role="slider"] {
+    background: #00d09c !important;
+    border: 2px solid #0b0e14 !important;
+    box-shadow: 0 0 0 3px rgba(0,208,156,0.25) !important;
+}
+.scenario-form [data-testid="stSlider"] label {
+    display: none !important;
+}
+.scenario-form [data-testid="stSlider"] {
+    padding-top: 0 !important;
+    margin-top: -4px !important;
+}
+
+/* Preset buttons sit inside a row — lighter than primary. */
+.preset-row .stButton > button {
+    background: #11151d !important;
+    border: 1px solid #1f2633 !important;
+    color: #c9cfd9 !important;
+    font-size: 0.8rem !important;
+    padding: 7px 10px !important;
+}
+.preset-row .stButton > button:hover {
+    border-color: #00d09c !important;
+    color: #00d09c !important;
 }
 </style>
 """
@@ -160,9 +317,8 @@ def render_scenario_lab():
     st.markdown(_LAB_CSS, unsafe_allow_html=True)
     st.title("Scenario Lab")
     st.caption(
-        "Bloomberg-terminal thinking, Varsity-style. "
-        "Learn what moves your stocks, build scenarios, and validate your hypotheses "
-        "against history before you risk capital."
+        "Read pressure, not prices. Tune the world, see who moves, and pressure-test "
+        "your ideas against the last thousand trading days before you risk a rupee."
     )
 
     # --- Matrix controls (shared) ---
@@ -170,10 +326,10 @@ def render_scenario_lab():
     with left:
         st.markdown(
             "<div class='lab-banner'>"
-            "🎓 <b>How to use this.</b> Start at <i>Learn</i> to meet the drivers. "
-            "Move to <i>Cause-Effect Graph</i> to see who reacts to what, and by how much. "
-            "Then open <i>Scenario Builder</i> to simulate a morning scenario and get trade ideas "
-            "grounded in historical base rates. Use <i>Hypothesis Lab</i> to stress-test your own beliefs."
+            "<span class='step'>01</span> <b>Learn</b> the eight drivers that move Indian equities. "
+            "<span class='step'>02</span> Follow the <b>Cause-Effect graph</b> to see who reacts, and by how much. "
+            "<span class='step'>03</span> Dial a morning in <b>Scenario Builder</b> — get ranked trade ideas with historical base rates. "
+            "<span class='step'>04</span> Stress-test a belief in <b>Hypothesis Lab</b> before you risk capital."
             "</div>",
             unsafe_allow_html=True,
         )
@@ -190,6 +346,23 @@ def render_scenario_lab():
         if st.button("↻ Recompute matrix", use_container_width=True, key="lab_refresh"):
             st.cache_resource.clear()
             st.rerun()
+
+    # --- Methodology note: how relations are built ---
+    st.markdown(
+        "<div class='method-note'>"
+        "<span class='tag'>How this works</span>"
+        "Relationships here are <b>learned from history, not hand-drawn</b>. "
+        "For every driver (crude, USD/INR, US 10Y, VIX, S&amp;P, DXY, copper, FII flow) we download "
+        "its daily move and the daily move of each Nifty 50 stock for your lookback window, then "
+        "run a rolling regression to estimate each stock's <i>beta</i> (sensitivity) and "
+        "<i>hit-rate</i> (how often it moved in the implied direction). "
+        "<b>Scenario Builder</b> multiplies your shocks by those betas and aggregates to sector and index. "
+        "<b>Hypothesis Lab</b> finds every day in history that matched your conditions and reports what "
+        "actually happened next — no priors, no hand-tuned geopolitics. Re-run after a regime shift to "
+        "let the map update itself."
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
     with st.spinner(f"Loading {lookback}-day history for 50 stocks × {len(price_based_drivers())} drivers…"):
         matrix = _load_matrix(int(lookback))
@@ -233,18 +406,21 @@ def _render_learn_tab(matrix: SensitivityMatrix):
             with row[j]:
                 helps = ", ".join(driver.who_positive) if driver.who_positive else "—"
                 hurts = ", ".join(driver.who_negative) if driver.who_negative else "—"
+                pal = _palette(driver.category)
                 st.markdown(
                     f"""
-                    <div class='driver-card'>
-                        <span class='cat'>{driver.category}</span>
-                        <h4>{driver.name}</h4>
-                        <div class='what'><b>What it is.</b> {driver.what}</div>
+                    <div class='driver-card' style='--accent:{pal["accent"]}; --soft:{pal["soft"]}; --ring:{pal["ring"]};'>
+                        <div class='head'>
+                            <h4>{driver.name}</h4>
+                            <span class='cat'>{driver.category}</span>
+                        </div>
+                        <div class='what'>{driver.what}</div>
                         <div class='why'><b>Why it matters.</b> {driver.why}</div>
                         <div class='affected'>
-                            <span class='plus'>↑ helps:</span> {helps}<br/>
-                            <span class='minus'>↓ hurts:</span> {hurts}
+                            <span class='plus'>&uarr; helps:</span> {helps}<br/>
+                            <span class='minus'>&darr; hurts:</span> {hurts}
                         </div>
-                        <div class='example'>📌 {driver.example}</div>
+                        <div class='example'>&#128204; {driver.example}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -438,44 +614,76 @@ def _build_sankey(matrix: SensitivityMatrix, driver_list: list[str]) -> go.Figur
 def _render_builder_tab(matrix: SensitivityMatrix):
     st.markdown(
         "### Scenario Builder — *\"what if tomorrow morning…\"*\n"
-        "Move the sliders to set the overnight / intraday shocks you expect, "
-        "then hit **Simulate**. You will see the estimated impact on Nifty 50, "
-        "each sector, and the top ranked trade ideas with historical base rates."
+        "Dial in the overnight / intraday shocks you expect, then hit **Simulate**. "
+        "The engine maps your shocks through each stock's historical beta to estimate "
+        "sector and index impact, and surfaces trade ideas with the base-rate they've printed in the past."
     )
 
     form_col, result_col = st.columns([1, 2])
 
     with form_col:
         st.markdown("#### Driver shocks")
+        st.markdown('<div class="scenario-form">', unsafe_allow_html=True)
         shocks: dict[str, float] = {}
         for d_id in driver_ids():
             driver = DRIVERS[d_id]
+            pal = _palette(driver.category)
+            accent = pal["accent"]
+            soft = pal["soft"]
+            current = float(st.session_state.get(f"shock_{d_id}", 0.0))
+            value_str = (
+                f"{current:+,.0f} {driver.unit}"
+                if driver.unit == "₹ cr"
+                else f"{current:+.2f}{driver.unit}"
+            )
+            st.markdown(
+                f"<div class='shock-chip' style='--accent:{accent}; --soft:{soft};'>"
+                f"<span class='dot'></span>"
+                f"<span class='name'>{driver.name}</span>"
+                f"<span class='unit'>{driver.category}</span>"
+                f"<span class='value'>{value_str}</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
             shocks[d_id] = st.slider(
                 f"{driver.name} ({driver.unit})",
                 min_value=float(driver.shock_range[0]),
                 max_value=float(driver.shock_range[1]),
-                value=0.0,
+                value=current,
                 step=0.1 if driver.unit == "%" else 500.0 if d_id == "fii_flow" else 0.05,
                 key=f"shock_{d_id}",
                 help=driver.what,
+                label_visibility="collapsed",
             )
+        st.markdown('</div>', unsafe_allow_html=True)
 
         run = st.button("▶ Simulate scenario", type="primary", use_container_width=True)
+
+        st.markdown("<div style='font-size:0.72rem; color:#7a8294; margin:0.8rem 0 0.35rem; "
+                    "text-transform:uppercase; letter-spacing:0.08em; font-weight:600;'>"
+                    "Quick presets</div>", unsafe_allow_html=True)
+        st.markdown('<div class="preset-row">', unsafe_allow_html=True)
         preset_col1, preset_col2 = st.columns(2)
         with preset_col1:
-            if st.button("🛢 Oil Spike", use_container_width=True):
+            if st.button("Oil Spike", use_container_width=True, key="preset_oil"):
                 _apply_preset({"crude": 4.0, "vix": 8.0, "usdinr": 0.4})
                 st.rerun()
-            if st.button("💵 USD Strength", use_container_width=True):
+            if st.button("USD Strength", use_container_width=True, key="preset_usd"):
                 _apply_preset({"dxy": 1.0, "usdinr": 0.8, "us10y": 0.1})
                 st.rerun()
         with preset_col2:
-            if st.button("⚠ Risk-Off", use_container_width=True):
+            if st.button("Risk-Off", use_container_width=True, key="preset_rof"):
                 _apply_preset({"sp500": -1.5, "vix": 20.0, "dxy": 0.6, "fii_flow": -3000.0})
                 st.rerun()
-            if st.button("🌱 Risk-On", use_container_width=True):
+            if st.button("Risk-On", use_container_width=True, key="preset_ron"):
                 _apply_preset({"sp500": 1.5, "vix": -15.0, "copper": 2.0, "fii_flow": 2000.0})
                 st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        if st.button("Reset all", use_container_width=True, key="preset_reset"):
+            for d_id in driver_ids():
+                st.session_state[f"shock_{d_id}"] = 0.0
+            st.rerun()
 
     with result_col:
         if not run and not any(v != 0 for v in shocks.values()):
@@ -597,9 +805,9 @@ def _render_idea_card(idea: TradeIdea):
 def _render_hypothesis_tab():
     st.markdown(
         "### Hypothesis Lab — test your own belief\n"
-        "Describe a conditional rule you think is true. We'll find every day "
-        "in recent history where your conditions fired and show you how often "
-        "the trade actually worked."
+        "Write a conditional rule. We search every day in your lookback window for matches, "
+        "then replay what actually happened next — hit-rate, average return, distribution. "
+        "No priors, no narratives. Just the base rate."
     )
 
     st.markdown("#### Conditions (all must fire)")
