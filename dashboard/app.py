@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
 
-from dashboard.data_loader import load_market_snapshot
+from dashboard.data_loader import load_market_snapshot, market_freshness_key
 from dashboard.components.header import render_header
 from dashboard.components.market_overview import render_key_metrics, render_sectoral_heatmap
 from dashboard.components.top_movers import render_top_movers
@@ -111,7 +111,9 @@ def main():
         st.caption(
             "Data sourced from Yahoo Finance, NSE India, and Google News. "
             "All sources are free and require no API keys. "
-            "Data refreshes automatically every 5 minutes."
+            "During NSE market hours data refreshes every minute; "
+            "outside market hours it refreshes at the start of each new session. "
+            "Use the ↻ Refresh button to force an immediate fetch."
         )
 
     # --- Top bar: mode / view / refresh ---
@@ -127,7 +129,7 @@ def main():
 
 def _render_market_overview(view_key: str):
     """Render the original Market Overview dashboard."""
-    snapshot = load_market_snapshot(view=view_key)
+    snapshot = load_market_snapshot(view=view_key, _freshness=market_freshness_key())
 
     st.title("Indian Equity Market Dashboard")
     render_header(snapshot)

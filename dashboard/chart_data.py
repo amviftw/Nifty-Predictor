@@ -50,8 +50,13 @@ class ChartBundle:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def fetch_ohlcv(ticker: str, period: str, interval: str) -> pd.DataFrame:
-    """Fetch OHLCV candles from Yahoo Finance. Cached 60s."""
+def fetch_ohlcv(ticker: str, period: str, interval: str, _freshness: str = "") -> pd.DataFrame:
+    """Fetch OHLCV candles from Yahoo Finance. Cached 60s.
+
+    `_freshness` is part of the cache key only — see
+    `dashboard.data_loader.market_freshness_key`.
+    """
+    del _freshness
     data = yf.download(
         ticker,
         period=period,
@@ -74,9 +79,15 @@ def fetch_ohlcv(ticker: str, period: str, interval: str) -> pd.DataFrame:
     return data
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_quote_meta(ticker: str) -> dict:
-    """Fetch lightweight quote metadata: 52w high/low, currency, prev close."""
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_quote_meta(ticker: str, _freshness: str = "") -> dict:
+    """Fetch lightweight quote metadata: 52w high/low, currency, prev close.
+
+    Cached 60s and tied to the same freshness bucket as `fetch_ohlcv` so the
+    headline `last_price` cannot lag the candles. `_freshness` is part of
+    the cache key only.
+    """
+    del _freshness
     try:
         info = yf.Ticker(ticker).fast_info
         return {
@@ -158,11 +169,14 @@ def vwap(df: pd.DataFrame) -> pd.Series:
 
 def build_bundle(ticker: str, timeframe_key: str, override_interval: Optional[str] = None) -> ChartBundle:
     """Pull OHLCV, compute indicators, return a ChartBundle ready for plotting."""
+    from dashboard.data_loader import market_freshness_key
+
     period, default_interval = TIMEFRAMES.get(timeframe_key, ("1mo", "60m"))
     interval = override_interval or default_interval
 
-    df = fetch_ohlcv(ticker, period, interval)
-    meta = fetch_quote_meta(ticker)
+    freshness = market_freshness_key()
+    df = fetch_ohlcv(ticker, period, interval, _freshness=freshness)
+    meta = fetch_quote_meta(ticker, _freshness=freshness)
 
     if df.empty:
         return ChartBundle(

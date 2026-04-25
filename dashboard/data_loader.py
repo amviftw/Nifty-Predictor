@@ -35,6 +35,42 @@ from dashboard.config import (
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
+# NSE regular session
+_MARKET_OPEN = (9, 15)
+_MARKET_CLOSE = (15, 30)
+
+
+def is_market_open_now(now: datetime | None = None) -> bool:
+    """True iff `now` (IST) falls inside the NSE regular trading session."""
+    now = now or datetime.now(IST)
+    if not is_trading_day(now.date()):
+        return False
+    hm = (now.hour, now.minute)
+    return _MARKET_OPEN <= hm <= _MARKET_CLOSE
+
+
+def market_freshness_key(now: datetime | None = None) -> str:
+    """
+    Cache-key bucket that drives `load_market_snapshot` re-fetches.
+
+    - During NSE market hours: rotates every minute, so prices stay <=60s
+      behind the live tape.
+    - Outside market hours (after-hours, weekends, holidays): keyed on the
+      most recent trading day, so a fresh fetch is forced as soon as a new
+      session starts and the previous session's intraday tick can no longer
+      masquerade as the close.
+    """
+    now = now or datetime.now(IST)
+    if is_market_open_now(now):
+        return f"live-{now:%Y%m%d-%H%M}"
+    today = now.date()
+    last_session = today if is_trading_day(today) else prev_trading_day(today)
+    # Bucket by trading day + AM/PM so a request shortly after market close
+    # picks up the freshly settled close instead of the last intraday cache
+    # entry written seconds before 15:30.
+    half = "am" if now.hour < 12 else "pm"
+    return f"closed-{last_session.isoformat()}-{half}"
+
 
 @dataclass
 class MarketSnapshot:
@@ -86,8 +122,15 @@ class MarketSnapshot:
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="Fetching live market data...")
-def load_market_snapshot(view: str = "daily") -> MarketSnapshot:
-    """Master function: fetches all data and returns a MarketSnapshot."""
+def load_market_snapshot(view: str = "daily", _freshness: str = "") -> MarketSnapshot:
+    """Master function: fetches all data and returns a MarketSnapshot.
+
+    `_freshness` participates in the cache key only — its value comes from
+    `market_freshness_key()` and forces a re-fetch whenever the market state
+    transitions (each minute during the session, each new trading day after
+    close). It is intentionally unused inside the function body.
+    """
+    del _freshness
     now = datetime.now(IST)
     today = date.today()
     trading_day = today if is_trading_day(today) else prev_trading_day(today)
@@ -98,7 +141,7 @@ def load_market_snapshot(view: str = "daily") -> MarketSnapshot:
     snapshot = MarketSnapshot(
         timestamp=now,
         view=view,
-        is_market_open=is_trading_day(today) and 9 <= now.hour <= 16,
+        is_market_open=is_market_open_now(now),
         last_trading_date=trading_day.isoformat(),
     )
 

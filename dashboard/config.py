@@ -114,8 +114,14 @@ GLOBAL_INDEX_DISPLAY = {
     "HANGSENG": "Hang Seng",
 }
 
-# Cache TTL for Streamlit @st.cache_data
-CACHE_TTL_SECONDS = 300  # 5 minutes
+# Cache TTL for Streamlit @st.cache_data.
+# This is the *upper bound* — actual freshness is driven by the market-aware
+# freshness key in dashboard.data_loader.market_freshness_key(), which busts
+# the cache every minute during NSE market hours and at every new trading day
+# after close. Keeping the decorator TTL short ensures that even if the
+# freshness key somehow stays constant, stale data cannot linger longer than
+# this.
+CACHE_TTL_SECONDS = 60
 
 # Number of top gainers/losers to show
 TOP_MOVERS_COUNT = 10
