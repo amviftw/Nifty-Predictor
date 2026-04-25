@@ -13,13 +13,18 @@ import streamlit as st
 from loguru import logger
 
 from dashboard.config import SECTORAL_INDICES, CACHE_TTL_SECONDS
+from dashboard.data_loader import _market_minute_bucket
 
 NUM_WEEKS = 16
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
-def _fetch_sector_weekly() -> pd.DataFrame:
-    """Fetch ~1 year of weekly pct changes for all sectoral indices."""
+def _fetch_sector_weekly(_bucket: str = "") -> pd.DataFrame:
+    """Fetch ~1 year of weekly pct changes for all sectoral indices.
+
+    `_bucket` is part of the cache key only.
+    """
+    del _bucket
     tickers = list(SECTORAL_INDICES.values())
     try:
         data = yf.download(
@@ -77,7 +82,7 @@ def render_sector_momentum():
         "Sorted by recent 5-week hit rate, then 4-week cumulative return."
     )
 
-    full_df = _fetch_sector_weekly()
+    full_df = _fetch_sector_weekly(_bucket=_market_minute_bucket())
     if full_df.empty:
         st.info("Sector weekly data unavailable")
         return

@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from config.holidays import prev_trading_day, is_trading_day
 from config.nifty50_tickers import NIFTY50_STOCKS, get_yahoo_tickers
 from dashboard.config import CACHE_TTL_SECONDS
+from dashboard.data_loader import _market_minute_bucket
 
 DB_PATH = Path(__file__).resolve().parents[2] / "storage" / "nifty_predictor.db"
 
@@ -115,8 +116,12 @@ def _render_signal_table(signals: list[dict]):
 # ---------------------------------------------------------------------------
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="Computing technical signals...")
-def _compute_tech_signals() -> pd.DataFrame:
-    """Quick RSI + MACD + SMA scan for all Nifty 50 stocks."""
+def _compute_tech_signals(_bucket: str = "") -> pd.DataFrame:
+    """Quick RSI + MACD + SMA scan for all Nifty 50 stocks.
+
+    `_bucket` is part of the cache key only.
+    """
+    del _bucket
     tickers = " ".join(get_yahoo_tickers())
     try:
         data = yf.download(
@@ -200,7 +205,7 @@ def _render_technical_signals():
         "`python scripts/daily_predict.py` locally."
     )
 
-    df = _compute_tech_signals()
+    df = _compute_tech_signals(_bucket=_market_minute_bucket())
     if df.empty:
         st.info("Unable to compute signals — data fetch may have failed.")
         return

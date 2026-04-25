@@ -7,11 +7,16 @@ import streamlit as st
 from loguru import logger
 
 from dashboard.config import CACHE_TTL_SECONDS
+from dashboard.data_loader import _market_minute_bucket
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
-def _fetch_nifty_history(period: str = "1y") -> pd.DataFrame:
-    """Fetch Nifty 50 index OHLCV history."""
+def _fetch_nifty_history(period: str = "1y", _bucket: str = "") -> pd.DataFrame:
+    """Fetch Nifty 50 index OHLCV history.
+
+    `_bucket` is part of the cache key only.
+    """
+    del _bucket
     try:
         data = yf.download("^NSEI", period=period, interval="1d", progress=False)
         if data.empty:
@@ -43,7 +48,7 @@ def render_ema_chart(view: str = "daily"):
     """Render Nifty 50 EMA/SMA delta chart."""
     st.markdown("#### Nifty 50 — Distance from Moving Averages")
 
-    df = _fetch_nifty_history("2y")
+    df = _fetch_nifty_history("2y", _bucket=_market_minute_bucket())
     if df.empty:
         st.info("Historical data unavailable for EMA chart")
         return

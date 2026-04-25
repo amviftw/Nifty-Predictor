@@ -7,13 +7,19 @@ import streamlit as st
 from loguru import logger
 
 from config.nifty50_tickers import NIFTY50_STOCKS, get_yahoo_tickers
-from dashboard.data_loader import MarketSnapshot
+from dashboard.data_loader import MarketSnapshot, _market_minute_bucket
 from dashboard.config import CACHE_TTL_SECONDS
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
-def _fetch_extended_metrics() -> dict:
-    """Batch-fetch 1Y data → RSI 14, volume ratio, 52-week high per stock."""
+def _fetch_extended_metrics(_bucket: str = "") -> dict:
+    """Batch-fetch 1Y data → RSI 14, volume ratio, 52-week high per stock.
+
+    `_bucket` is part of the cache key only — pass `_market_minute_bucket()`
+    so per-stock RSI/52W/volume metrics on the chip cards stay in sync with
+    the price coming from `load_market_snapshot`.
+    """
+    del _bucket
     tickers = get_yahoo_tickers()
     try:
         data = yf.download(
@@ -74,7 +80,7 @@ def render_top_movers(snapshot: MarketSnapshot):
         st.info("Stock data unavailable")
         return
 
-    ext = _fetch_extended_metrics()
+    ext = _fetch_extended_metrics(_bucket=_market_minute_bucket())
     change_key = "dod_pct" if snapshot.view == "daily" else "wow_pct"
     change_label = "Day" if snapshot.view == "daily" else "Week"
 

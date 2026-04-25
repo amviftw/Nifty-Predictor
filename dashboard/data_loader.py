@@ -34,6 +34,19 @@ from dashboard.config import (
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
+# NSE regular session (IST)
+_MARKET_OPEN = (9, 15)
+_MARKET_CLOSE = (15, 30)
+
+
+def is_market_open_now(now: datetime | None = None) -> bool:
+    """True iff `now` (IST) falls inside the NSE regular trading session."""
+    now = now or datetime.now(IST)
+    if not is_trading_day(now.date()):
+        return False
+    hm = (now.hour, now.minute)
+    return _MARKET_OPEN <= hm <= _MARKET_CLOSE
+
 
 @dataclass
 class MarketSnapshot:
@@ -84,26 +97,35 @@ class MarketSnapshot:
     unchanged_count: int = 0
 
 
-def _market_minute_bucket() -> int:
-    """Returns a minute-bucket key during market hours, else hour-bucket.
+def _market_minute_bucket() -> str:
+    """Cache-key bucket that drives cache invalidation across the dashboard.
 
-    Market hours (9:00–16:00 IST on trading days): 1-min buckets so cached
-    snapshots invalidate every minute and chips show fresh prints.
-    Off-hours: hour-bucket so we don't hammer Yahoo when nothing's moving.
+    - During NSE market hours (9:15–15:30 IST on trading days): rotates every
+      minute, so cached snapshots stay <=60s behind the live tape.
+    - Outside market hours (after-hours, weekends, holidays): keyed on the
+      most recent trading day plus an AM/PM marker. This guarantees a fresh
+      fetch the moment a new session starts, so a viewer on Saturday cannot
+      see Friday's last intraday tick masquerading as the close — the bucket
+      transitions from `live-...` to `closed-2026-04-24-pm` immediately at
+      15:30 IST and forces a re-fetch that picks up the settled close.
     """
     now = datetime.now(IST)
-    today = date.today()
-    if is_trading_day(today) and 9 <= now.hour <= 16:
-        return int(now.timestamp() // 60)
-    return int(now.timestamp() // 3600)
+    if is_market_open_now(now):
+        return f"live-{now:%Y%m%d-%H%M}"
+    today = now.date()
+    last_session = today if is_trading_day(today) else prev_trading_day(today)
+    half = "am" if now.hour < 12 else "pm"
+    return f"closed-{last_session.isoformat()}-{half}"
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="Fetching live market data...")
-def load_market_snapshot(view: str = "daily", _bucket: int = 0) -> MarketSnapshot:
+def load_market_snapshot(view: str = "daily", _bucket: str = "") -> MarketSnapshot:
     """Master function: fetches all data and returns a MarketSnapshot.
 
     The `_bucket` argument is a cache-key only — pass `_market_minute_bucket()`
-    so the cache rotates every minute during market hours.
+    so the cache rotates every minute during market hours and forces a fresh
+    fetch on every session boundary (so Friday's last intraday tick can never
+    leak into Saturday's view).
     """
     now = datetime.now(IST)
     today = date.today()
@@ -115,7 +137,7 @@ def load_market_snapshot(view: str = "daily", _bucket: int = 0) -> MarketSnapsho
     snapshot = MarketSnapshot(
         timestamp=now,
         view=view,
-        is_market_open=is_trading_day(today) and 9 <= now.hour <= 16,
+        is_market_open=is_market_open_now(now),
         last_trading_date=trading_day.isoformat(),
     )
 
