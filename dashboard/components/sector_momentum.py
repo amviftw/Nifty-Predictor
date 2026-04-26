@@ -1,13 +1,14 @@
 """
 Sectoral momentum heatmap: 16-week rolling view of sector performance.
 
-Inspired by the "momentum grid" pattern — each cell represents one week,
-filled/green when the sector was positive, hollow/grey when negative.
-Shows at-a-glance which sectors are gaining or losing momentum.
+Each cell = one week's return: filled green square = positive week, hollow red
+square = negative week, with opacity scaling to magnitude. Column headers show
+the actual week-start date pulled from the weekly bars themselves, so as new
+weekly bars print on Yahoo Finance the right-most column auto-advances on the
+next cache rotation — no manual update needed.
 """
 
 import pandas as pd
-import numpy as np
 import yfinance as yf
 import streamlit as st
 from loguru import logger
@@ -16,13 +17,26 @@ from dashboard.config import SECTORAL_INDICES, CACHE_TTL_SECONDS
 from dashboard.data_loader import _market_minute_bucket
 
 NUM_WEEKS = 16
+RECENT_WINDOW = 5
+
+# Palette aligned with the Groww-style dashboard CSS in app.py
+POS = "#00d09c"
+NEG = "#eb5757"
+NEUTRAL = "#7a8294"
+TEXT_PRIMARY = "#e8ecf1"
+TEXT_SECONDARY = "#c9cfd9"
+TEXT_MUTED = "#7a8294"
+PANEL = "#151922"
+BORDER = "#232834"
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def _fetch_sector_weekly(_bucket: str = "") -> pd.DataFrame:
     """Fetch ~1 year of weekly pct changes for all sectoral indices.
 
-    `_bucket` is part of the cache key only.
+    `_bucket` is part of the cache key only; passing `_market_minute_bucket()`
+    rotates the cache every minute during NSE hours and at every session
+    boundary, so a freshly-printed weekly bar shows up on the next refresh.
     """
     del _bucket
     tickers = list(SECTORAL_INDICES.values())
@@ -55,162 +69,288 @@ def _fetch_sector_weekly(_bucket: str = "") -> pd.DataFrame:
                 close = data["Close"].dropna()
             if len(close) < 3:
                 continue
-            pct = close.pct_change() * 100
-            records[name] = pct
+            records[name] = close.pct_change() * 100
         except Exception:
             continue
 
     if not records:
         return pd.DataFrame()
 
-    df = pd.DataFrame(records)
-    return df.iloc[1:]  # drop first NaN row from pct_change; keep full year
+    return pd.DataFrame(records).iloc[1:]
 
 
-def _momentum_score(series: pd.Series) -> int:
-    """Count how many of the last 5 weeks were positive."""
-    recent = series.tail(5).dropna()
-    return int((recent > 0).sum())
+def _hit_rate(series: pd.Series, window: int = RECENT_WINDOW) -> int:
+    return int((series.tail(window).dropna() > 0).sum())
+
+
+def _current_streak(series: pd.Series) -> int:
+    """Signed run-length of consecutive same-sign weeks ending at the latest week.
+
+    Positive return value = current up-streak length, negative = down-streak.
+    """
+    vals = series.dropna().to_numpy()
+    if len(vals) == 0 or vals[-1] == 0:
+        return 0
+    sign = 1 if vals[-1] > 0 else -1
+    streak = 0
+    for v in vals[::-1]:
+        if (sign == 1 and v > 0) or (sign == -1 and v < 0):
+            streak += 1
+        else:
+            break
+    return streak * sign
+
+
+def _cum_return(series: pd.Series) -> float:
+    s = series.dropna()
+    if s.empty:
+        return 0.0
+    return ((1 + s / 100).prod() - 1) * 100
+
+
+def _format_week_label(idx) -> str:
+    """yfinance weekly bars are indexed by the Monday of the week."""
+    if hasattr(idx, "strftime"):
+        return idx.strftime("%b %d")
+    return str(idx)
 
 
 def render_sector_momentum():
-    """Render the sectoral momentum heatmap grid."""
-    st.markdown("#### Sectoral Momentum — Weekly Performance Grid")
-    st.caption(
-        f"Last {NUM_WEEKS} weeks. Each block = one week. "
-        "Filled = positive week, hollow = negative. "
-        "Sorted by recent 5-week hit rate, then 4-week cumulative return."
-    )
-
+    """Render the sectoral momentum grid."""
     full_df = _fetch_sector_weekly(_bucket=_market_minute_bucket())
     if full_df.empty:
+        st.markdown("#### Sectoral Momentum — Weekly Performance Grid")
         st.info("Sector weekly data unavailable")
         return
 
-    # Last NUM_WEEKS for the grid; full year kept for cum % (1Y)
     df = full_df.tail(NUM_WEEKS)
-
     sectors = list(df.columns)
-    weeks = list(range(1, len(df) + 1))
+    week_dates = list(df.index)
+    date_labels = [_format_week_label(d) for d in week_dates]
 
-    # Compute per-sector stats
+    latest_label = date_labels[-1] if date_labels else "—"
+
+    st.markdown("#### Sectoral Momentum — Weekly Performance Grid")
+    st.markdown(
+        f'<div style="font-size:0.72rem;color:{TEXT_MUTED};margin:-4px 0 10px;line-height:1.55;">'
+        f'Last {NUM_WEEKS} weeks &middot; week-ending '
+        f'<span style="color:{TEXT_SECONDARY};">{latest_label}</span> &middot; '
+        f'<span style="display:inline-block;width:8px;height:8px;background:{POS};'
+        f'border-radius:1px;vertical-align:middle;margin-right:4px;"></span>filled = up week '
+        f'&middot; '
+        f'<span style="display:inline-block;width:8px;height:8px;border:1.5px solid {NEG};'
+        f'border-radius:1px;vertical-align:middle;margin-right:4px;"></span>hollow = down week '
+        f'&middot; opacity scales with magnitude &middot; '
+        f'sorted by recent {RECENT_WINDOW}-week hit-rate then 4-week cumulative return &middot; '
+        f'<span style="color:{POS};">auto-refreshes</span> as new weekly bars print on Yahoo.'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Per-sector stats
     stats = {}
     for s in sectors:
         col = df[s].dropna()
-        score = _momentum_score(col)
-        cum_1y = ((1 + full_df[s].dropna() / 100).prod() - 1) * 100
-        cum_4w = ((1 + col.tail(4) / 100).prod() - 1) * 100
-        stats[s] = {"score": score, "cum_1y": cum_1y, "cum_4w": cum_4w}
+        stats[s] = {
+            "hit": _hit_rate(col, RECENT_WINDOW),
+            "cum_4w": _cum_return(col.tail(4)),
+            "cum_13w": _cum_return(col.tail(13)),
+            "cum_1y": _cum_return(full_df[s]),
+            "streak": _current_streak(col),
+        }
 
-    # Sort by momentum score descending, then by 4-week cumulative return
-    sorted_sectors = sorted(sectors, key=lambda s: (stats[s]["score"], stats[s]["cum_4w"]), reverse=True)
-
-    # Build the grid as HTML for rich rendering
-    week_labels = [f"W{w}" for w in weeks]
-    recent_start = max(0, len(weeks) - 5)
-
-    html_parts = ['<div style="overflow-x:auto;">']
-    html_parts.append(
-        '<table style="border-collapse:collapse; width:100%; font-size:13px; font-family:sans-serif;">'
+    sorted_sectors = sorted(
+        sectors,
+        key=lambda s: (stats[s]["hit"], stats[s]["cum_4w"]),
+        reverse=True,
     )
+
+    recent_start = max(0, len(week_dates) - RECENT_WINDOW)
+
+    # Magnitude normaliser — clamp so a single outlier doesn't wash everything out
+    abs_vals = df.abs().to_numpy().flatten()
+    abs_vals = abs_vals[~pd.isna(abs_vals)]
+    if len(abs_vals):
+        # Use 90th percentile so typical weeks read as full-intensity
+        mag_norm = float(pd.Series(abs_vals).quantile(0.90)) or 1.0
+    else:
+        mag_norm = 1.0
+
+    css = f"""
+    <style>
+    .smt-wrap {{
+        background: {PANEL};
+        border: 1px solid {BORDER};
+        border-radius: 12px;
+        padding: 14px 16px 10px;
+        overflow-x: auto;
+    }}
+    .smt {{
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font: 13px/1.4 'Inter', -apple-system, Segoe UI, sans-serif;
+        color: {TEXT_SECONDARY};
+    }}
+    .smt thead th {{
+        font-size: 0.66rem;
+        font-weight: 500;
+        color: {TEXT_MUTED};
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 6px 4px 10px;
+        border-bottom: 1px solid {BORDER};
+        text-align: center;
+        white-space: nowrap;
+    }}
+    .smt thead th.sector-h {{ text-align: left; padding-left: 4px; }}
+    .smt thead th.dt {{
+        font-size: 0.62rem;
+        letter-spacing: 0.02em;
+        text-transform: none;
+        font-variant-numeric: tabular-nums;
+    }}
+    .smt thead th.dt.recent {{ color: {TEXT_SECONDARY}; font-weight: 600; }}
+    .smt thead th.dt.current {{
+        color: {POS};
+        background: rgba(0,208,156,0.06);
+        border-radius: 4px 4px 0 0;
+    }}
+    .smt thead th.divider {{ border-left: 1px solid {BORDER}; padding-left: 12px; }}
+    .smt tbody td {{
+        padding: 8px 4px;
+        border-bottom: 1px solid rgba(35,40,52,0.6);
+    }}
+    .smt tbody tr:last-child td {{ border-bottom: none; }}
+    .smt tbody tr:hover td {{ background: rgba(99,102,241,0.04); }}
+    .smt td.sector {{
+        text-align: left;
+        padding-left: 4px;
+        color: {TEXT_PRIMARY};
+        font-weight: 600;
+        font-size: 0.82rem;
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+    }}
+    .smt td.cell {{ text-align: center; }}
+    .smt td.cell.recent {{ background: rgba(255,255,255,0.018); }}
+    .smt td.cell.current {{ background: rgba(0,208,156,0.06); }}
+    .smt td.num {{
+        text-align: right;
+        padding: 8px 10px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 500;
+    }}
+    .smt td.streak {{ text-align: center; font-variant-numeric: tabular-nums; }}
+    .smt td.divider {{ border-left: 1px solid {BORDER}; padding-left: 12px; }}
+    .smt .mark {{
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+        vertical-align: middle;
+    }}
+    .smt .mark.up   {{ background: {POS}; }}
+    .smt .mark.down {{ background: transparent; border: 1.5px solid {NEG}; }}
+    .smt .hit-bar {{
+        display: inline-block;
+        width: 32px;
+        height: 5px;
+        background: rgba(255,255,255,0.06);
+        border-radius: 3px;
+        position: relative;
+        vertical-align: middle;
+        margin-right: 8px;
+    }}
+    .smt .hit-bar > i {{
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        border-radius: 3px;
+        display: block;
+    }}
+    </style>
+    """
+
+    parts = [css, '<div class="smt-wrap"><table class="smt">']
 
     # Header row
-    html_parts.append("<tr>")
-    html_parts.append('<th style="text-align:left; padding:6px 10px; border-bottom:2px solid #333;">Sector</th>')
-    for i, wl in enumerate(week_labels):
-        bg = "rgba(255,255,255,0.05)" if i >= recent_start else ""
-        style = f"background:{bg};" if bg else ""
-        weight = "font-weight:700;" if i >= recent_start else "font-weight:400; color:#888;"
-        html_parts.append(
-            f'<th style="text-align:center; padding:4px 2px; border-bottom:2px solid #333; {style}{weight}">{wl}</th>'
-        )
-    html_parts.append('<th style="text-align:center; padding:6px 8px; border-bottom:2px solid #333; border-left:2px solid #555;">W{0}+</th>'.format(NUM_WEEKS - 4))
-    html_parts.append('<th style="text-align:right; padding:6px 8px; border-bottom:2px solid #333;">4W Cum %</th>')
-    html_parts.append('<th style="text-align:right; padding:6px 8px; border-bottom:2px solid #333;">1Y Cum %</th>')
-    html_parts.append("</tr>")
+    parts.append("<thead><tr>")
+    parts.append('<th class="sector-h">Sector</th>')
+    for i, lbl in enumerate(date_labels):
+        cls = ["dt"]
+        if i >= recent_start:
+            cls.append("recent")
+        if i == len(date_labels) - 1:
+            cls.append("current")
+        parts.append(f'<th class="{" ".join(cls)}">{lbl}</th>')
+    parts.append('<th class="divider">5W Hit</th>')
+    parts.append("<th>Streak</th>")
+    parts.append("<th>4W</th>")
+    parts.append("<th>13W</th>")
+    parts.append("<th>1Y</th>")
+    parts.append("</tr></thead>")
 
+    parts.append("<tbody>")
     for sector in sorted_sectors:
         col = df[sector]
-        score = stats[sector]["score"]
-        cum_4w = stats[sector]["cum_4w"]
-        cum_1y = stats[sector]["cum_1y"]
-
-        # Sector name styling based on score
-        if score >= 4:
-            name_color = "#4ade80"
-        elif score >= 3:
-            name_color = "#fbbf24"
-        else:
-            name_color = "#f87171"
-
-        html_parts.append("<tr>")
+        s = stats[sector]
         label = sector.replace("Nifty ", "").upper()
-        html_parts.append(
-            f'<td style="padding:6px 10px; font-weight:600; color:{name_color}; '
-            f'border-bottom:1px solid #222; white-space:nowrap;">{label}</td>'
-        )
 
+        parts.append(f'<tr><td class="sector">{label}</td>')
+
+        # Per-week dot cells
         for i, val in enumerate(col):
-            is_recent = i >= recent_start
-            if pd.isna(val):
-                cell = '<span style="color:#555;">·</span>'
-            elif val > 1.5:
-                cell = '<span style="color:#22c55e; font-size:16px;">&#9632;</span>'
-            elif val > 0:
-                cell = '<span style="color:#4ade80; font-size:14px;">&#9632;</span>'
-            elif val > -1.5:
-                cell = '<span style="color:#f87171; font-size:14px;">&#9632;</span>'
-            else:
-                cell = '<span style="color:#ef4444; font-size:16px;">&#9632;</span>'
+            cls = ["cell"]
+            if i >= recent_start:
+                cls.append("recent")
+            if i == len(col) - 1:
+                cls.append("current")
 
-            bg = "rgba(255,255,255,0.03)" if is_recent else ""
-            style = f"background:{bg};" if bg else ""
-            html_parts.append(
-                f'<td style="text-align:center; padding:4px 2px; border-bottom:1px solid #222; {style}">{cell}</td>'
+            if pd.isna(val):
+                marker = f'<span style="color:{TEXT_MUTED};opacity:0.4;">·</span>'
+                tip = f"{date_labels[i]}: n/a"
+            else:
+                opacity = max(0.32, min(1.0, abs(val) / mag_norm))
+                kind = "up" if val >= 0 else "down"
+                marker = f'<span class="mark {kind}" style="opacity:{opacity:.2f};"></span>'
+                tip = f"{date_labels[i]}: {val:+.2f}%"
+
+            parts.append(f'<td class="{" ".join(cls)}" title="{tip}">{marker}</td>')
+
+        # 5W Hit cell with bar
+        hit = s["hit"]
+        hit_pct = hit / RECENT_WINDOW * 100
+        if hit >= 4:
+            bar_color, text_color = POS, POS
+        elif hit >= 3:
+            bar_color, text_color = "#f0b034", "#f0b034"
+        else:
+            bar_color, text_color = NEG, NEG
+        bar_html = (
+            f'<span class="hit-bar"><i style="width:{hit_pct:.0f}%;background:{bar_color};"></i></span>'
+            f'<span style="color:{text_color};font-weight:600;">{hit}/{RECENT_WINDOW}</span>'
+        )
+        parts.append(f'<td class="num divider" style="text-align:left;">{bar_html}</td>')
+
+        # Streak
+        streak = s["streak"]
+        if streak > 0:
+            streak_html = f'<span style="color:{POS};font-weight:600;">▲ {streak}</span>'
+        elif streak < 0:
+            streak_html = f'<span style="color:{NEG};font-weight:600;">▼ {abs(streak)}</span>'
+        else:
+            streak_html = f'<span style="color:{NEUTRAL};">—</span>'
+        parts.append(f'<td class="streak">{streak_html}</td>')
+
+        # 4W / 13W / 1Y cumulative
+        for val, weight in ((s["cum_4w"], 600), (s["cum_13w"], 500), (s["cum_1y"], 400)):
+            color = POS if val > 0 else NEG if val < 0 else NEUTRAL
+            parts.append(
+                f'<td class="num" style="color:{color};font-weight:{weight};">{val:+.1f}%</td>'
             )
 
-        # Score column
-        html_parts.append(
-            f'<td style="text-align:center; padding:6px 8px; border-bottom:1px solid #222; '
-            f'border-left:2px solid #555; font-weight:700;">{score}/5</td>'
-        )
+        parts.append("</tr>")
 
-        # 4-week cumulative %
-        c4_color = "#4ade80" if cum_4w > 0 else "#f87171"
-        html_parts.append(
-            f'<td style="text-align:right; padding:6px 8px; border-bottom:1px solid #222; '
-            f'color:{c4_color}; font-weight:600;">{cum_4w:+.1f}%</td>'
-        )
+    parts.append("</tbody></table></div>")
 
-        # 1-year cumulative %
-        c1_color = "#4ade80" if cum_1y > 0 else "#f87171"
-        html_parts.append(
-            f'<td style="text-align:right; padding:6px 8px; border-bottom:1px solid #222; '
-            f'color:{c1_color};">{cum_1y:+.1f}%</td>'
-        )
-        html_parts.append("</tr>")
-
-    # Divider between high and low momentum
-    # (already sorted, visual separation via color is enough)
-
-    html_parts.append("</table></div>")
-
-    st.markdown("".join(html_parts), unsafe_allow_html=True)
-
-    # Legend
-    st.caption(
-        "&#9632; Large green = >1.5% up · Small green = 0–1.5% up · "
-        "Small red = 0–1.5% down · Large red = >1.5% down · "
-        "Score = positive weeks in last 5"
-    )
-
-    # Commentary
-    strong = [s for s in sorted_sectors if stats[s]["score"] >= 4]
-    weak = [s for s in sorted_sectors if stats[s]["score"] <= 1]
-
-    if strong:
-        names = ", ".join(s.replace("Nifty ", "") for s in strong)
-        st.success(f"Strong momentum: **{names}** — 4+ positive weeks in last 5")
-    if weak:
-        names = ", ".join(s.replace("Nifty ", "") for s in weak)
-        st.error(f"Weak momentum: **{names}** — 1 or fewer positive weeks in last 5")
+    st.markdown("".join(parts), unsafe_allow_html=True)
