@@ -59,6 +59,12 @@ class MarketSnapshot:
     nifty50_close: float = 0.0
     nifty50_change_pct: float = 0.0
     nifty50_wow_pct: float = 0.0
+    # Anchor used for the WoW number: the close (and its date) from the last
+    # trading day strictly before the current calendar week's Monday.
+    # Surfaced so the dashboard can render "WoW: +0.4% (vs Fri 25-Apr 23,892)"
+    # and users don't have to guess what the comparison is.
+    nifty50_wow_anchor_close: float = 0.0
+    nifty50_wow_anchor_date: str = ""
 
     # Sectoral indices DataFrame: columns=[close, dod_pct, wow_pct, mom_pct]
     sectoral_data: pd.DataFrame = field(default_factory=pd.DataFrame)
@@ -97,40 +103,44 @@ class MarketSnapshot:
     unchanged_count: int = 0
 
 
-def _week_pct_change(closes: pd.Series, dates=None) -> float:
-    """Percent change from the last close strictly before this calendar week's Monday.
+def _week_pct_change_full(closes: pd.Series, dates=None) -> tuple[float, float, str]:
+    """Return (wow_pct, anchor_close, anchor_date_iso) for the current week.
 
-    Why not a rolling 5-trading-day return: 'WoW' should reflect *this week's*
-    cycle, not a 7-day window that drifts. On a Friday close this matches
-    Fri-vs-prior-Fri; mid-week it shows how far the index has moved since the
-    prior weekly close (i.e. the in-progress weekly return).
+    Anchor = close on the last trading day strictly before this calendar week's
+    Monday. On a Friday close this is the prior Friday. Mid-week it's still the
+    prior Friday — which is exactly the "last Friday vs latest" semantics the
+    dashboard surfaces as WoW.
 
-    `dates` may be passed when `closes.index` is not a DatetimeIndex (e.g. the
-    YahooFetcher reset_index() flow). If neither is available, falls back to a
-    5-trading-day rolling delta so callers never raise.
+    `dates` may be supplied when `closes.index` isn't a DatetimeIndex (e.g. the
+    YahooFetcher reset_index() flow). If no calendar information is available,
+    falls back to a 5-trading-day rolling anchor so callers never raise; in
+    that fallback `anchor_date_iso` is "".
     """
     if len(closes) < 2:
-        return 0.0
+        return 0.0, 0.0, ""
     latest = float(closes.iloc[-1])
     if not latest:
-        return 0.0
+        return 0.0, 0.0, ""
 
     if dates is None:
         if isinstance(closes.index, pd.DatetimeIndex):
-            dates_arr = closes.index
+            dates_arr = list(closes.index)
         else:
-            return _rolling_week_pct_change(closes)
+            anchor_close, pct = _rolling_week_anchor(closes)
+            return pct, anchor_close, ""
     else:
         try:
             dates_arr = pd.to_datetime(pd.Series(dates).reset_index(drop=True)).tolist()
         except Exception:
-            return _rolling_week_pct_change(closes)
+            anchor_close, pct = _rolling_week_anchor(closes)
+            return pct, anchor_close, ""
 
     try:
         latest_dt = pd.Timestamp(dates_arr[-1])
         monday = latest_dt.normalize() - pd.Timedelta(days=latest_dt.weekday())
     except Exception:
-        return _rolling_week_pct_change(closes)
+        anchor_close, pct = _rolling_week_anchor(closes)
+        return pct, anchor_close, ""
 
     anchor_pos = -1
     for i in range(len(dates_arr) - 1, -1, -1):
@@ -139,21 +149,31 @@ def _week_pct_change(closes: pd.Series, dates=None) -> float:
             break
 
     if anchor_pos < 0:
-        return _rolling_week_pct_change(closes)
+        anchor_close, pct = _rolling_week_anchor(closes)
+        return pct, anchor_close, ""
 
     anchor = float(closes.iloc[anchor_pos])
     if not anchor:
-        return 0.0
-    return ((latest - anchor) / anchor) * 100
+        return 0.0, anchor, ""
+    pct = ((latest - anchor) / anchor) * 100
+    anchor_date = pd.Timestamp(dates_arr[anchor_pos]).date().isoformat()
+    return pct, anchor, anchor_date
 
 
-def _rolling_week_pct_change(closes: pd.Series) -> float:
-    """Fallback: 5-trading-day rolling delta when calendar dates are unavailable."""
+def _week_pct_change(closes: pd.Series, dates=None) -> float:
+    """Percent change vs the prior week's last close. See _week_pct_change_full."""
+    pct, _, _ = _week_pct_change_full(closes, dates)
+    return pct
+
+
+def _rolling_week_anchor(closes: pd.Series) -> tuple[float, float]:
+    """Fallback: (anchor_close, pct) using a 5-trading-day rolling delta."""
     if len(closes) < 6:
-        return 0.0
+        return 0.0, 0.0
     anchor = float(closes.iloc[-6])
     latest = float(closes.iloc[-1])
-    return ((latest - anchor) / anchor) * 100 if anchor else 0.0
+    pct = ((latest - anchor) / anchor) * 100 if anchor else 0.0
+    return anchor, pct
 
 
 def _market_minute_bucket() -> str:
@@ -369,7 +389,10 @@ def _fetch_nifty50(snapshot: MarketSnapshot, period: str):
     snapshot.nifty50_close = latest
     snapshot.nifty50_change_pct = ((latest - prev) / prev) * 100 if prev else 0
 
-    snapshot.nifty50_wow_pct = _week_pct_change(closes)
+    wow_pct, anchor_close, anchor_date = _week_pct_change_full(closes)
+    snapshot.nifty50_wow_pct = wow_pct
+    snapshot.nifty50_wow_anchor_close = anchor_close
+    snapshot.nifty50_wow_anchor_date = anchor_date
 
 
 def _fetch_india_vix(snapshot: MarketSnapshot, period: str):

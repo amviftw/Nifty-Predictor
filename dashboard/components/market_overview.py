@@ -12,9 +12,11 @@ def render_key_metrics(snapshot: MarketSnapshot):
     cols = st.columns(5)
 
     with cols[0]:
-        nifty_delta = snapshot.nifty50_change_pct if snapshot.view == "daily" else snapshot.nifty50_wow_pct
-        label = "Nifty 50 (DoD)" if snapshot.view == "daily" else "Nifty 50 (WoW)"
-        st.metric(label, f"{snapshot.nifty50_close:,.0f}", f"{nifty_delta:+.1f}%")
+        # Show DoD and WoW side by side so users don't have to toggle to see
+        # the weekly number — and never confuse a one-day move with a
+        # week-on-week move. The view toggle still drives sort order
+        # elsewhere; here we always render both.
+        _render_nifty_chip(snapshot)
 
     with cols[1]:
         st.metric("India VIX", f"{snapshot.india_vix:.1f}", f"{snapshot.india_vix_change:+.1f}%",
@@ -41,6 +43,61 @@ def render_key_metrics(snapshot: MarketSnapshot):
             breadth_label,
             delta_color="off",
         )
+
+
+def _render_nifty_chip(snapshot: MarketSnapshot):
+    """Custom Nifty 50 KPI card showing DoD and WoW together.
+
+    The previous st.metric flipped between DoD and WoW based on the view
+    toggle, which let users mistake a one-day -0.7% for a weekly move.
+    Showing both anchored to the explicit prior-Friday close removes that
+    ambiguity.
+    """
+    close = snapshot.nifty50_close
+    dod = snapshot.nifty50_change_pct
+    wow = snapshot.nifty50_wow_pct
+    anchor_close = snapshot.nifty50_wow_anchor_close
+    anchor_date = snapshot.nifty50_wow_anchor_date
+
+    dod_color = "#00d09c" if dod > 0 else "#eb5757" if dod < 0 else "#c9cfd9"
+    wow_color = "#00d09c" if wow > 0 else "#eb5757" if wow < 0 else "#c9cfd9"
+
+    if anchor_date and anchor_close:
+        try:
+            anchor_label = pd.Timestamp(anchor_date).strftime("%a %d-%b")
+        except Exception:
+            anchor_label = anchor_date
+        anchor_caption = (
+            f"WoW vs {anchor_label} close ({anchor_close:,.0f})"
+        )
+    else:
+        anchor_caption = ""
+
+    st.markdown(
+        f"""
+        <div style="background:#151922;border:1px solid #232834;border-radius:10px;
+                    padding:14px 18px;">
+          <div style="font-size:0.68rem;color:#7a8294;font-weight:500;
+                      text-transform:uppercase;letter-spacing:0.06em;">Nifty 50</div>
+          <div style="font-size:1.4rem;font-weight:600;color:#e8ecf1;
+                      letter-spacing:-0.01em;margin-top:2px;">{close:,.0f}</div>
+          <div style="display:flex;gap:14px;margin-top:8px;font-size:0.78rem;">
+            <div>
+              <span style="color:#7a8294;font-size:0.62rem;text-transform:uppercase;
+                          letter-spacing:0.04em;">DoD</span>
+              <div style="color:{dod_color};font-weight:600;">{dod:+.1f}%</div>
+            </div>
+            <div style="border-left:1px solid #232834;padding-left:14px;">
+              <span style="color:#7a8294;font-size:0.62rem;text-transform:uppercase;
+                          letter-spacing:0.04em;">WoW</span>
+              <div style="color:{wow_color};font-weight:600;">{wow:+.1f}%</div>
+            </div>
+          </div>
+          {f'<div style="font-size:0.66rem;color:#6b7587;margin-top:8px;">{anchor_caption}</div>' if anchor_caption else ''}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_sectoral_heatmap(snapshot: MarketSnapshot):
