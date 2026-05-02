@@ -146,9 +146,11 @@ def _render_fii_dii(snapshot: MarketSnapshot):
     chart_df.columns = ["FII Net", "DII Net"]
     st.bar_chart(chart_df, height=200)
 
-    # WoW (5d) and MoM (20d) aggregates for both FII and DII.
-    fii_wow = float(fii_df["fii_net_buy"].tail(5).sum())
-    dii_wow = float(fii_df["dii_net_buy"].tail(5).sum())
+    # WoW = week-to-date cumulative (Mon-of-this-week to latest print). Falls
+    # back to a 5-print rolling sum if the snapshot WTD isn't populated.
+    # MoM stays as a 20-print rolling sum (full ~1-month window).
+    fii_wow = float(snapshot.fii_wtd) if snapshot.fii_wtd else float(fii_df["fii_net_buy"].tail(5).sum())
+    dii_wow = float(snapshot.dii_wtd) if snapshot.dii_wtd else float(fii_df["dii_net_buy"].tail(5).sum())
     fii_mom = float(fii_df["fii_net_buy"].tail(20).sum())
     dii_mom = float(fii_df["dii_net_buy"].tail(20).sum())
 

@@ -77,10 +77,24 @@ class MarketSnapshot:
     # Macro
     india_vix: float = 0.0
     india_vix_change: float = 0.0
+    india_vix_wow_pct: float = 0.0
+    india_vix_wow_anchor_close: float = 0.0
+    india_vix_wow_anchor_date: str = ""
     usdinr: float = 0.0
     usdinr_change: float = 0.0
+    usdinr_wow_pct: float = 0.0
+    usdinr_wow_anchor_close: float = 0.0
+    usdinr_wow_anchor_date: str = ""
     fii_net_buy: float = 0.0
     dii_net_buy: float = 0.0
+    # Week-cycle flow aggregates: cumulative ₹ cr from Monday-of-this-week to
+    # the latest available print, plus the same metric for the prior calendar
+    # week (used as the WoW anchor on the headline chip).
+    fii_wtd: float = 0.0
+    dii_wtd: float = 0.0
+    fii_prev_week: float = 0.0
+    dii_prev_week: float = 0.0
+    flow_prev_week_label: str = ""
 
     # Macro time series for charts
     vix_series: pd.DataFrame = field(default_factory=pd.DataFrame)
@@ -356,8 +370,53 @@ def _populate_macro_data(snapshot: MarketSnapshot, period: str):
             latest_fii = fii_dii[-1]
             snapshot.fii_net_buy = latest_fii.get("fii_net_buy", 0.0)
             snapshot.dii_net_buy = latest_fii.get("dii_net_buy", 0.0)
+            _populate_flow_week_aggregates(snapshot, fii_dii)
     except Exception as e:
         logger.warning(f"FII/DII fetch failed: {e}")
+
+
+def _populate_flow_week_aggregates(snapshot: MarketSnapshot, fii_dii: list[dict]):
+    """Compute week-to-date and prior-week net flow sums for FII and DII.
+
+    Anchor weeks on calendar Mondays so the WoW comparison on the FII chip
+    matches every other WoW number on the dashboard:
+      - WTD = sum of net flows from this week's Monday up to the latest print
+      - prior week = sum across the prior calendar week (Mon..Sun)
+    """
+    if not fii_dii:
+        return
+    rows = []
+    for r in fii_dii:
+        d = r.get("date")
+        try:
+            ts = pd.Timestamp(d)
+        except Exception:
+            continue
+        rows.append((
+            ts.normalize(),
+            float(r.get("fii_net_buy") or 0.0),
+            float(r.get("dii_net_buy") or 0.0),
+        ))
+    if not rows:
+        return
+
+    rows.sort(key=lambda x: x[0])
+    latest_dt = rows[-1][0]
+    monday_this = latest_dt - pd.Timedelta(days=latest_dt.weekday())
+    monday_prev = monday_this - pd.Timedelta(days=7)
+
+    fii_wtd = sum(f for d, f, _ in rows if d >= monday_this)
+    dii_wtd = sum(di for d, _, di in rows if d >= monday_this)
+    fii_prev = sum(f for d, f, _ in rows if monday_prev <= d < monday_this)
+    dii_prev = sum(di for d, _, di in rows if monday_prev <= d < monday_this)
+
+    snapshot.fii_wtd = fii_wtd
+    snapshot.dii_wtd = dii_wtd
+    snapshot.fii_prev_week = fii_prev
+    snapshot.dii_prev_week = dii_prev
+    snapshot.flow_prev_week_label = (
+        f"{monday_prev.strftime('%d-%b')}–{(monday_this - pd.Timedelta(days=1)).strftime('%d-%b')}"
+    )
 
 
 def _fetch_single_ticker(ticker: str, period: str) -> pd.Series:
@@ -406,6 +465,11 @@ def _fetch_india_vix(snapshot: MarketSnapshot, period: str):
     if prev:
         snapshot.india_vix_change = ((snapshot.india_vix - prev) / prev) * 100
 
+    wow_pct, anchor_close, anchor_date = _week_pct_change_full(closes)
+    snapshot.india_vix_wow_pct = wow_pct
+    snapshot.india_vix_wow_anchor_close = anchor_close
+    snapshot.india_vix_wow_anchor_date = anchor_date
+
     vix_data = [{"date": str(d.date()) if hasattr(d, "date") else str(d)[:10],
                  "India VIX": float(v)} for d, v in closes.items()]
     snapshot.vix_series = pd.DataFrame(vix_data).set_index("date") if vix_data else pd.DataFrame()
@@ -421,6 +485,11 @@ def _fetch_usdinr(snapshot: MarketSnapshot, period: str):
     prev = float(closes.iloc[-2])
     if prev:
         snapshot.usdinr_change = ((snapshot.usdinr - prev) / prev) * 100
+
+    wow_pct, anchor_close, anchor_date = _week_pct_change_full(closes)
+    snapshot.usdinr_wow_pct = wow_pct
+    snapshot.usdinr_wow_anchor_close = anchor_close
+    snapshot.usdinr_wow_anchor_date = anchor_date
 
     usdinr_data = [{"date": str(d.date()) if hasattr(d, "date") else str(d)[:10],
                     "USD/INR": float(v)} for d, v in closes.items()]

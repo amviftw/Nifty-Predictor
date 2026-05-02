@@ -8,94 +8,205 @@ from dashboard.config import SECTOR_INDEX_TO_SECTOR
 
 
 def render_key_metrics(snapshot: MarketSnapshot):
-    """Render the headline KPI metric cards."""
+    """Render the headline KPI metric cards.
+
+    Every chip with a sensible weekly comparison (Nifty, VIX, USD/INR,
+    FII/DII) shows DoD and WoW together with the prior-week anchor labelled
+    in plain text — no view-toggle gymnastics, no DoD-mistaken-for-WoW.
+    """
     cols = st.columns(5)
 
     with cols[0]:
-        # Show DoD and WoW side by side so users don't have to toggle to see
-        # the weekly number — and never confuse a one-day move with a
-        # week-on-week move. The view toggle still drives sort order
-        # elsewhere; here we always render both.
         _render_nifty_chip(snapshot)
 
     with cols[1]:
-        st.metric("India VIX", f"{snapshot.india_vix:.1f}", f"{snapshot.india_vix_change:+.1f}%",
-                  delta_color="inverse")
+        _render_price_chip(
+            title="India VIX",
+            value=f"{snapshot.india_vix:.1f}",
+            dod=snapshot.india_vix_change,
+            wow=snapshot.india_vix_wow_pct,
+            anchor_close=snapshot.india_vix_wow_anchor_close,
+            anchor_date=snapshot.india_vix_wow_anchor_date,
+            anchor_close_format="{:.1f}",
+            inverse=True,
+        )
 
     with cols[2]:
-        st.metric("USD/INR", f"{snapshot.usdinr:.2f}", f"{snapshot.usdinr_change:+.1f}%",
-                  delta_color="inverse")
+        _render_price_chip(
+            title="USD/INR",
+            value=f"{snapshot.usdinr:.2f}",
+            dod=snapshot.usdinr_change,
+            wow=snapshot.usdinr_wow_pct,
+            anchor_close=snapshot.usdinr_wow_anchor_close,
+            anchor_date=snapshot.usdinr_wow_anchor_date,
+            anchor_close_format="{:.2f}",
+            inverse=True,
+        )
 
     with cols[3]:
-        st.metric("FII Net (Cr)", f"{snapshot.fii_net_buy:,.0f}",
-                  "Buying" if snapshot.fii_net_buy > 0 else "Selling")
+        _render_flow_chip(snapshot)
 
     with cols[4]:
-        total = snapshot.advance_count + snapshot.decline_count + snapshot.unchanged_count
-        if total > 0:
-            adv_pct = snapshot.advance_count / total * 100
-            breadth_label = f"{adv_pct:.0f}% advancing"
-        else:
-            breadth_label = ""
-        st.metric(
-            "Advance / Decline",
-            f"{snapshot.advance_count} / {snapshot.decline_count}",
-            breadth_label,
-            delta_color="off",
-        )
+        _render_breadth_chip(snapshot)
 
 
-def _render_nifty_chip(snapshot: MarketSnapshot):
-    """Custom Nifty 50 KPI card showing DoD and WoW together.
+def _delta_color(val: float, inverse: bool = False) -> str:
+    """Green/red/grey for a percent delta. `inverse=True` flips for VIX/USDINR
+    where rising is bad."""
+    if inverse:
+        return "#eb5757" if val > 0 else "#00d09c" if val < 0 else "#c9cfd9"
+    return "#00d09c" if val > 0 else "#eb5757" if val < 0 else "#c9cfd9"
 
-    The previous st.metric flipped between DoD and WoW based on the view
-    toggle, which let users mistake a one-day -0.7% for a weekly move.
-    Showing both anchored to the explicit prior-Friday close removes that
-    ambiguity.
-    """
-    close = snapshot.nifty50_close
-    dod = snapshot.nifty50_change_pct
-    wow = snapshot.nifty50_wow_pct
-    anchor_close = snapshot.nifty50_wow_anchor_close
-    anchor_date = snapshot.nifty50_wow_anchor_date
 
-    dod_color = "#00d09c" if dod > 0 else "#eb5757" if dod < 0 else "#c9cfd9"
-    wow_color = "#00d09c" if wow > 0 else "#eb5757" if wow < 0 else "#c9cfd9"
+def _format_anchor_caption(anchor_date: str, anchor_close: float, fmt: str) -> str:
+    if not (anchor_date and anchor_close):
+        return ""
+    try:
+        label = pd.Timestamp(anchor_date).strftime("%a %d-%b")
+    except Exception:
+        label = anchor_date
+    return f"WoW vs {label} close ({fmt.format(anchor_close)})"
 
-    if anchor_date and anchor_close:
-        try:
-            anchor_label = pd.Timestamp(anchor_date).strftime("%a %d-%b")
-        except Exception:
-            anchor_label = anchor_date
-        anchor_caption = (
-            f"WoW vs {anchor_label} close ({anchor_close:,.0f})"
-        )
-    else:
-        anchor_caption = ""
 
-    st.markdown(
-        f"""
+def _kpi_chip_html(
+    title: str,
+    headline: str,
+    left_label: str,
+    left_value: str,
+    left_color: str,
+    right_label: str,
+    right_value: str,
+    right_color: str,
+    caption: str = "",
+) -> str:
+    """Shared markup for every headline KPI chip on the dashboard."""
+    caption_html = (
+        f'<div style="font-size:0.66rem;color:#6b7587;margin-top:8px;">{caption}</div>'
+        if caption else ""
+    )
+    return f"""
         <div style="background:#151922;border:1px solid #232834;border-radius:10px;
                     padding:14px 18px;">
           <div style="font-size:0.68rem;color:#7a8294;font-weight:500;
-                      text-transform:uppercase;letter-spacing:0.06em;">Nifty 50</div>
+                      text-transform:uppercase;letter-spacing:0.06em;">{title}</div>
           <div style="font-size:1.4rem;font-weight:600;color:#e8ecf1;
-                      letter-spacing:-0.01em;margin-top:2px;">{close:,.0f}</div>
+                      letter-spacing:-0.01em;margin-top:2px;">{headline}</div>
           <div style="display:flex;gap:14px;margin-top:8px;font-size:0.78rem;">
             <div>
               <span style="color:#7a8294;font-size:0.62rem;text-transform:uppercase;
-                          letter-spacing:0.04em;">DoD</span>
-              <div style="color:{dod_color};font-weight:600;">{dod:+.1f}%</div>
+                          letter-spacing:0.04em;">{left_label}</span>
+              <div style="color:{left_color};font-weight:600;">{left_value}</div>
             </div>
             <div style="border-left:1px solid #232834;padding-left:14px;">
               <span style="color:#7a8294;font-size:0.62rem;text-transform:uppercase;
-                          letter-spacing:0.04em;">WoW</span>
-              <div style="color:{wow_color};font-weight:600;">{wow:+.1f}%</div>
+                          letter-spacing:0.04em;">{right_label}</span>
+              <div style="color:{right_color};font-weight:600;">{right_value}</div>
             </div>
           </div>
-          {f'<div style="font-size:0.66rem;color:#6b7587;margin-top:8px;">{anchor_caption}</div>' if anchor_caption else ''}
+          {caption_html}
         </div>
-        """,
+    """
+
+
+def _render_nifty_chip(snapshot: MarketSnapshot):
+    """Nifty 50 chip — DoD + WoW with prior-Friday anchor."""
+    dod = snapshot.nifty50_change_pct
+    wow = snapshot.nifty50_wow_pct
+    caption = _format_anchor_caption(
+        snapshot.nifty50_wow_anchor_date,
+        snapshot.nifty50_wow_anchor_close,
+        "{:,.0f}",
+    )
+    st.markdown(
+        _kpi_chip_html(
+            title="Nifty 50",
+            headline=f"{snapshot.nifty50_close:,.0f}",
+            left_label="DoD", left_value=f"{dod:+.1f}%", left_color=_delta_color(dod),
+            right_label="WoW", right_value=f"{wow:+.1f}%", right_color=_delta_color(wow),
+            caption=caption,
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_price_chip(
+    title: str,
+    value: str,
+    dod: float,
+    wow: float,
+    anchor_close: float,
+    anchor_date: str,
+    anchor_close_format: str,
+    inverse: bool = False,
+):
+    """Generic price-style KPI chip (VIX, USD/INR)."""
+    caption = _format_anchor_caption(anchor_date, anchor_close, anchor_close_format)
+    st.markdown(
+        _kpi_chip_html(
+            title=title,
+            headline=value,
+            left_label="DoD",
+            left_value=f"{dod:+.1f}%",
+            left_color=_delta_color(dod, inverse=inverse),
+            right_label="WoW",
+            right_value=f"{wow:+.1f}%",
+            right_color=_delta_color(wow, inverse=inverse),
+            caption=caption,
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_flow_chip(snapshot: MarketSnapshot):
+    """FII/DII flow chip — today's net + week-to-date with prior-week anchor.
+
+    The flow analogue of WoW is "this week's cumulative net buy" vs "last
+    week's cumulative net buy" — same Mon-anchored window as every other
+    WoW number on the dashboard.
+    """
+    today_net = snapshot.fii_net_buy + snapshot.dii_net_buy
+    wtd_net = snapshot.fii_wtd + snapshot.dii_wtd
+    prev_net = snapshot.fii_prev_week + snapshot.dii_prev_week
+
+    caption = ""
+    if snapshot.flow_prev_week_label:
+        sign = "+" if prev_net > 0 else ""
+        caption = f"WoW vs prior wk ({snapshot.flow_prev_week_label}): {sign}{prev_net:,.0f}"
+
+    st.markdown(
+        _kpi_chip_html(
+            title="FII + DII Net (₹ Cr)",
+            headline=f"{today_net:+,.0f}",
+            left_label="FII WTD",
+            left_value=f"{snapshot.fii_wtd:+,.0f}",
+            left_color=_delta_color(snapshot.fii_wtd),
+            right_label="DII WTD",
+            right_value=f"{snapshot.dii_wtd:+,.0f}",
+            right_color=_delta_color(snapshot.dii_wtd),
+            caption=caption,
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_breadth_chip(snapshot: MarketSnapshot):
+    """Advance/Decline breadth chip — kept as a count, no WoW concept."""
+    total = snapshot.advance_count + snapshot.decline_count + snapshot.unchanged_count
+    if total > 0:
+        adv_pct = snapshot.advance_count / total * 100
+        dec_pct = snapshot.decline_count / total * 100
+    else:
+        adv_pct = dec_pct = 0.0
+
+    headline = f"{snapshot.advance_count} / {snapshot.decline_count}"
+    st.markdown(
+        _kpi_chip_html(
+            title="Advance / Decline",
+            headline=headline,
+            left_label="Up", left_value=f"{adv_pct:.0f}%", left_color="#00d09c",
+            right_label="Down", right_value=f"{dec_pct:.0f}%", right_color="#eb5757",
+            caption=f"of {total} Nifty 50 stocks" if total else "",
+        ),
         unsafe_allow_html=True,
     )
 
