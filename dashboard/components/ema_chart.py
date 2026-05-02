@@ -74,7 +74,7 @@ def render_ema_chart(view: str = "daily"):
         val = latest[label]
         with col:
             color = "green" if val > 0 else "red"
-            st.markdown(f"**{label}**: :{color}[{val:+.2f}%]")
+            st.markdown(f"**{label}**: :{color}[{val:+.1f}%]")
 
     if latest["SMA 200"] < 0 and latest["EMA 25"] > 0:
         st.caption("Short-term recovery above EMA 25 while still below 200-day SMA — watch for trend reversal confirmation")

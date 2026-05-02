@@ -706,9 +706,9 @@ def render_target_hunter():
                 if tech:
                     st.metric("RSI (14)", f"{tech['rsi']:.1f}")
                     st.metric("Price vs SMA50",
-                              f"{(tech['close']/tech['sma50']-1)*100:+.2f}%" if tech['sma50'] else "—")
+                              f"{(tech['close']/tech['sma50']-1)*100:+.1f}%" if tech['sma50'] else "—")
                     st.metric("Price vs SMA200",
-                              f"{(tech['close']/tech['sma200']-1)*100:+.2f}%" if tech['sma200'] else "—")
+                              f"{(tech['close']/tech['sma200']-1)*100:+.1f}%" if tech['sma200'] else "—")
                     st.metric("% of 52W range", f"{tech['pct_of_52w']:.0f}%")
                     st.caption(
                         f"MACD {'bullish' if tech['signals']['macd_bullish'] else 'bearish'} ・ "

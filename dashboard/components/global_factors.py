@@ -130,7 +130,7 @@ def _index_card_html(name: str, close: float, dod: float, wow: float | None,
         w_sign = "+" if wow > 0 else ""
         wow_html = (
             f"<span class='wow'>WoW "
-            f"<span class='val {w_cls}'>{w_sign}{wow:.2f}%</span></span>"
+            f"<span class='val {w_cls}'>{w_sign}{wow:.1f}%</span></span>"
         )
 
     dod_sign = "+" if dod > 0 else ""
@@ -139,7 +139,7 @@ def _index_card_html(name: str, close: float, dod: float, wow: float | None,
         f"<div class='name'>{name}</div>"
         f"<div class='row'>"
         f"<span class='price'>{close:,.2f}</span>"
-        f"<span class='dod {dod_cls}'>{dod_sign}{dod:.2f}%</span>"
+        f"<span class='dod {dod_cls}'>{dod_sign}{dod:.1f}%</span>"
         f"</div>"
         f"<div class='foot'>{wow_html}{spark_svg}</div>"
         f"</div>"
@@ -270,7 +270,7 @@ def _render_factor_strip(factor_data: dict):
             f'<span style="font-size:0.82rem;font-weight:600;color:#e8ecf1;">'
             f'{fd["price"]:,.2f}</span>'
             f'<span style="font-size:0.78rem;font-weight:600;color:{color};">'
-            f'{dod:+.2f}%</span>'
+            f'{dod:+.1f}%</span>'
             f'</div>'
             f'</div>'
         )
@@ -365,7 +365,7 @@ def _render_chain_row(c: dict) -> str:
                     else "rgba(245,166,35,0.4)" if abs(dod) >= 1.5
                     else "#2a3142")
         factor_nodes.append(_node_html(
-            "Global Factor", fname, f"{dod:+.2f}%  &middot;  {fd['price']:,.2f}",
+            "Global Factor", fname, f"{dod:+.1f}%  &middot;  {fd['price']:,.2f}",
             f_color, border=f_border, min_width=170,
         ))
     factor_block = (
@@ -381,7 +381,7 @@ def _render_chain_row(c: dict) -> str:
         sector_node = _node_html(
             "Indian Sector",
             f"{sector} &middot; {sect_idx_name}",
-            f"{sect_chg:+.2f}%  &middot;  {float(sector_row['Close']):,.0f}",
+            f"{sect_chg:+.1f}%  &middot;  {float(sector_row['Close']):,.0f}",
             sect_color, min_width=200,
         )
     else:
@@ -394,7 +394,7 @@ def _render_chain_row(c: dict) -> str:
         stk_chg = top_stock["change"]
         stk_color = "#00d09c" if stk_chg > 0 else "#eb5757" if stk_chg < 0 else "#c9cfd9"
         stock_node = _node_html(
-            "Top Mover", top_stock["symbol"], f"{stk_chg:+.2f}%",
+            "Top Mover", top_stock["symbol"], f"{stk_chg:+.1f}%",
             stk_color, min_width=130,
         )
     else:

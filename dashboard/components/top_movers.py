@@ -177,7 +177,7 @@ def _render_chips(stocks: list, ext: dict, change_key: str, is_gainer: bool):
             f'<div style="display:flex;justify-content:space-between;align-items:center;">'
             f'<span style="font-weight:700;font-size:0.85rem;color:#e8ecf1;">{sym}</span>'
             f'<span style="background:{chg_bg};color:{chg_color};padding:2px 8px;'
-            f'border-radius:4px;font-weight:600;font-size:0.78rem;">{change:+.2f}%</span>'
+            f'border-radius:4px;font-weight:600;font-size:0.78rem;">{change:+.1f}%</span>'
             f'</div>'
             f'<div style="font-size:0.68rem;color:#7a8294;margin-top:2px;white-space:nowrap;'
             f'overflow:hidden;text-overflow:ellipsis;">{company}</div>'

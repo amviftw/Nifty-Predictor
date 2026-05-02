@@ -313,7 +313,7 @@ def render_sector_momentum():
                 opacity = max(0.32, min(1.0, abs(val) / mag_norm))
                 kind = "up" if val >= 0 else "down"
                 marker = f'<span class="mark {kind}" style="opacity:{opacity:.2f};"></span>'
-                tip = f"{date_labels[i]}: {val:+.2f}%"
+                tip = f"{date_labels[i]}: {val:+.1f}%"
 
             parts.append(f'<td class="{" ".join(cls)}" title="{tip}">{marker}</td>')
 

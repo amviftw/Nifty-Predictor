@@ -194,10 +194,11 @@ def _render_vix_stats(snapshot: MarketSnapshot):
     series = snapshot.vix_series.iloc[:, 0] if not snapshot.vix_series.empty else None
 
     wow_txt, mom_txt = "", ""
-    if series is not None and len(series) >= 6:
-        week_ago = float(series.iloc[-6])
-        if week_ago:
-            wow_txt = f"WoW {((vix - week_ago) / week_ago) * 100:+.1f}%"
+    if series is not None and len(series) >= 2:
+        from dashboard.data_loader import _week_pct_change
+        wow_pct = _week_pct_change(series, dates=series.index)
+        if wow_pct or len(series) >= 6:
+            wow_txt = f"WoW {wow_pct:+.1f}%"
     if series is not None and len(series) >= 21:
         month_ago = float(series.iloc[-21])
         if month_ago:
@@ -221,14 +222,15 @@ def _render_usdinr_stats(snapshot: MarketSnapshot):
     series = snapshot.usdinr_series.iloc[:, 0] if not snapshot.usdinr_series.empty else None
 
     wow_txt, mom_txt = "", ""
-    if series is not None and len(series) >= 6:
-        week_ago = float(series.iloc[-6])
-        if week_ago:
-            wow_txt = f"WoW {((usd - week_ago) / week_ago) * 100:+.2f}%"
+    if series is not None and len(series) >= 2:
+        from dashboard.data_loader import _week_pct_change
+        wow_pct = _week_pct_change(series, dates=series.index)
+        if wow_pct or len(series) >= 6:
+            wow_txt = f"WoW {wow_pct:+.1f}%"
     if series is not None and len(series) >= 21:
         month_ago = float(series.iloc[-21])
         if month_ago:
-            mom_txt = f"MoM {((usd - month_ago) / month_ago) * 100:+.2f}%"
+            mom_txt = f"MoM {((usd - month_ago) / month_ago) * 100:+.1f}%"
 
     change = snapshot.usdinr_change
     if change > 0.3:

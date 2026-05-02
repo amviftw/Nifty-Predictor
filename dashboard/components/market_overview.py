@@ -14,14 +14,14 @@ def render_key_metrics(snapshot: MarketSnapshot):
     with cols[0]:
         nifty_delta = snapshot.nifty50_change_pct if snapshot.view == "daily" else snapshot.nifty50_wow_pct
         label = "Nifty 50 (DoD)" if snapshot.view == "daily" else "Nifty 50 (WoW)"
-        st.metric(label, f"{snapshot.nifty50_close:,.0f}", f"{nifty_delta:+.2f}%")
+        st.metric(label, f"{snapshot.nifty50_close:,.0f}", f"{nifty_delta:+.1f}%")
 
     with cols[1]:
-        st.metric("India VIX", f"{snapshot.india_vix:.1f}", f"{snapshot.india_vix_change:+.2f}%",
+        st.metric("India VIX", f"{snapshot.india_vix:.1f}", f"{snapshot.india_vix_change:+.1f}%",
                   delta_color="inverse")
 
     with cols[2]:
-        st.metric("USD/INR", f"{snapshot.usdinr:.2f}", f"{snapshot.usdinr_change:+.2f}%",
+        st.metric("USD/INR", f"{snapshot.usdinr:.2f}", f"{snapshot.usdinr_change:+.1f}%",
                   delta_color="inverse")
 
     with cols[3]:
@@ -125,17 +125,17 @@ def render_sectoral_heatmap(snapshot: MarketSnapshot):
             f'padding:14px 16px;min-width:210px;flex:1 1 210px;max-width:280px;">'
             f'<div style="display:flex;justify-content:space-between;align-items:center;">'
             f'<span style="font-weight:700;font-size:0.88rem;color:#e8ecf1;">{idx_name}</span>'
-            f'<span style="color:{chg_color};font-weight:600;font-size:0.88rem;">{change:+.2f}%</span>'
+            f'<span style="color:{chg_color};font-weight:600;font-size:0.88rem;">{change:+.1f}%</span>'
             f'</div>'
             f'<div style="font-size:1.0rem;font-weight:500;color:#c9cfd9;margin-top:4px;">'
             f'{close:,.0f}</div>'
             f'<div style="display:flex;gap:18px;margin-top:10px;font-size:0.72rem;">'
             f'<div><span style="color:#7a8294;font-size:0.62rem;text-transform:uppercase;'
             f'letter-spacing:0.04em;">Week</span>'
-            f'<br><span style="color:{wow_color};font-weight:500;">{wow:+.2f}%</span></div>'
+            f'<br><span style="color:{wow_color};font-weight:500;">{wow:+.1f}%</span></div>'
             f'<div><span style="color:#7a8294;font-size:0.62rem;text-transform:uppercase;'
             f'letter-spacing:0.04em;">Month</span>'
-            f'<br><span style="color:{mom_color};font-weight:500;">{mom:+.2f}%</span></div>'
+            f'<br><span style="color:{mom_color};font-weight:500;">{mom:+.1f}%</span></div>'
             f'</div>'
             f'{ad_html}{verdict_html}'
             f'</div>'

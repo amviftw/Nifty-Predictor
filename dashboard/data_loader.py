@@ -97,6 +97,65 @@ class MarketSnapshot:
     unchanged_count: int = 0
 
 
+def _week_pct_change(closes: pd.Series, dates=None) -> float:
+    """Percent change from the last close strictly before this calendar week's Monday.
+
+    Why not a rolling 5-trading-day return: 'WoW' should reflect *this week's*
+    cycle, not a 7-day window that drifts. On a Friday close this matches
+    Fri-vs-prior-Fri; mid-week it shows how far the index has moved since the
+    prior weekly close (i.e. the in-progress weekly return).
+
+    `dates` may be passed when `closes.index` is not a DatetimeIndex (e.g. the
+    YahooFetcher reset_index() flow). If neither is available, falls back to a
+    5-trading-day rolling delta so callers never raise.
+    """
+    if len(closes) < 2:
+        return 0.0
+    latest = float(closes.iloc[-1])
+    if not latest:
+        return 0.0
+
+    if dates is None:
+        if isinstance(closes.index, pd.DatetimeIndex):
+            dates_arr = closes.index
+        else:
+            return _rolling_week_pct_change(closes)
+    else:
+        try:
+            dates_arr = pd.to_datetime(pd.Series(dates).reset_index(drop=True)).tolist()
+        except Exception:
+            return _rolling_week_pct_change(closes)
+
+    try:
+        latest_dt = pd.Timestamp(dates_arr[-1])
+        monday = latest_dt.normalize() - pd.Timedelta(days=latest_dt.weekday())
+    except Exception:
+        return _rolling_week_pct_change(closes)
+
+    anchor_pos = -1
+    for i in range(len(dates_arr) - 1, -1, -1):
+        if pd.Timestamp(dates_arr[i]) < monday:
+            anchor_pos = i
+            break
+
+    if anchor_pos < 0:
+        return _rolling_week_pct_change(closes)
+
+    anchor = float(closes.iloc[anchor_pos])
+    if not anchor:
+        return 0.0
+    return ((latest - anchor) / anchor) * 100
+
+
+def _rolling_week_pct_change(closes: pd.Series) -> float:
+    """Fallback: 5-trading-day rolling delta when calendar dates are unavailable."""
+    if len(closes) < 6:
+        return 0.0
+    anchor = float(closes.iloc[-6])
+    latest = float(closes.iloc[-1])
+    return ((latest - anchor) / anchor) * 100 if anchor else 0.0
+
+
 def _market_minute_bucket() -> str:
     """Cache-key bucket that drives cache invalidation across the dashboard.
 
@@ -178,11 +237,13 @@ def _populate_stock_data(snapshot: MarketSnapshot, period: str):
             prev_close = float(closes.iloc[-2])
             dod_pct = ((latest_close - prev_close) / prev_close) * 100 if prev_close else 0
 
-            # WoW: compare to ~5 trading days ago
-            wow_pct = 0.0
-            if len(closes) >= 6:
-                week_ago_close = float(closes.iloc[-6])
-                wow_pct = ((latest_close - week_ago_close) / week_ago_close) * 100 if week_ago_close else 0
+            # WoW: change since prior calendar week's last close.
+            # Stock dataframes from YahooFetcher have been reset_index()'d, so the
+            # date lives in a "date" column rather than the Series index — pass it
+            # through explicitly so _week_pct_change can anchor on Monday boundary.
+            date_col = "date" if "date" in df.columns else None
+            dates_for_close = df.loc[closes.index, date_col] if date_col else None
+            wow_pct = _week_pct_change(closes, dates_for_close)
 
             # MoM: first available vs latest
             mom_pct = 0.0
@@ -256,11 +317,7 @@ def _populate_macro_data(snapshot: MarketSnapshot, period: str):
         latest = float(closes.iloc[-1])
         prev = float(closes.iloc[-2])
         dod_pct = ((latest - prev) / prev) * 100 if prev else 0.0
-        wow_pct = 0.0
-        if len(closes) >= 6:
-            week_ago = float(closes.iloc[-6])
-            if week_ago:
-                wow_pct = ((latest - week_ago) / week_ago) * 100
+        wow_pct = _week_pct_change(closes)
         # Trailing series for sparkline (last ~10 points)
         spark = closes.tail(10).reset_index(drop=True).tolist()
         snapshot.global_indices[display_name] = {
@@ -312,10 +369,7 @@ def _fetch_nifty50(snapshot: MarketSnapshot, period: str):
     snapshot.nifty50_close = latest
     snapshot.nifty50_change_pct = ((latest - prev) / prev) * 100 if prev else 0
 
-    if len(closes) >= 6:
-        week_ago = float(closes.iloc[-6])
-        if week_ago:
-            snapshot.nifty50_wow_pct = ((latest - week_ago) / week_ago) * 100
+    snapshot.nifty50_wow_pct = _week_pct_change(closes)
 
 
 def _fetch_india_vix(snapshot: MarketSnapshot, period: str):
@@ -397,10 +451,7 @@ def _populate_sectoral_data(snapshot: MarketSnapshot, period: str):
                 prev = float(closes.iloc[-2])
                 dod = ((latest - prev) / prev) * 100 if prev else 0
 
-                wow = 0.0
-                if len(closes) >= 6:
-                    w = float(closes.iloc[-6])
-                    wow = ((latest - w) / w) * 100 if w else 0
+                wow = _week_pct_change(closes)
 
                 mom = 0.0
                 if len(closes) >= 15:
@@ -471,10 +522,7 @@ def _populate_supply_chain(snapshot: MarketSnapshot, period: str):
                 prev = float(closes.iloc[-2])
                 dod = ((latest - prev) / prev) * 100 if prev else 0
 
-                wow = 0.0
-                if len(closes) >= 6:
-                    w = float(closes.iloc[-6])
-                    wow = ((latest - w) / w) * 100 if w else 0
+                wow = _week_pct_change(closes)
 
                 records.append({
                     "Factor": name,

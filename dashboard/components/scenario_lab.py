@@ -705,17 +705,17 @@ def _render_scenario_result(result: ScenarioResult):
     with m1:
         st.metric(
             "Est. Nifty 50 impact",
-            f"{result.nifty_expected_pct:+.2f}%",
+            f"{result.nifty_expected_pct:+.1f}%",
             help="Equal-weight mean of expected stock moves under your shocks."
         )
     with m2:
         top_sector = result.sector_expected_pct.idxmax() if not result.sector_expected_pct.empty else "—"
         top_val = result.sector_expected_pct.max() if not result.sector_expected_pct.empty else 0
-        st.metric("Best sector", top_sector, f"{top_val:+.2f}%")
+        st.metric("Best sector", top_sector, f"{top_val:+.1f}%")
     with m3:
         worst_sector = result.sector_expected_pct.idxmin() if not result.sector_expected_pct.empty else "—"
         worst_val = result.sector_expected_pct.min() if not result.sector_expected_pct.empty else 0
-        st.metric("Worst sector", worst_sector, f"{worst_val:+.2f}%")
+        st.metric("Worst sector", worst_sector, f"{worst_val:+.1f}%")
 
     # Sector strip
     if not result.sector_expected_pct.empty:
@@ -728,7 +728,7 @@ def _render_scenario_result(result: ScenarioResult):
             color="expected_pct",
             color_continuous_scale="RdYlGn",
             range_color=[-max(0.1, abs(sec_df["expected_pct"]).max()), max(0.1, abs(sec_df["expected_pct"]).max())],
-            text=sec_df["expected_pct"].map(lambda x: f"{x:+.2f}%"),
+            text=sec_df["expected_pct"].map(lambda x: f"{x:+.1f}%"),
         )
         fig.update_layout(
             template="plotly_dark",
@@ -785,7 +785,7 @@ def _render_idea_card(idea: TradeIdea):
         <div class='idea-card {klass}'>
             <div class='ticker-row'>
                 <span class='ticker'>{idea.direction} · {idea.symbol}</span>
-                <span class='move {move_klass}'>{idea.expected_move_pct:+.2f}%</span>
+                <span class='move {move_klass}'>{idea.expected_move_pct:+.1f}%</span>
             </div>
             <div class='meta'>
                 {idea.company} · {idea.sector} ·
@@ -889,8 +889,8 @@ def _render_hypothesis_tab():
             f"{result.hit_rate*100:.0f}%",
             help="Share of trigger days on which the trade direction made money over your horizon.",
         )
-        m2.metric("Avg return", f"{result.avg_return_pct:+.2f}%")
-        m3.metric("Median return", f"{result.median_return_pct:+.2f}%")
+        m2.metric("Avg return", f"{result.avg_return_pct:+.1f}%")
+        m3.metric("Median return", f"{result.median_return_pct:+.1f}%")
         m4.metric("Sample size", f"{result.n_trigger_days} days", f"of {result.n_total_days} total")
 
         # Verdict line
