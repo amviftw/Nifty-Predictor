@@ -682,24 +682,21 @@ def _fetch_market_caps(_day_bucket: str = "") -> dict[str, float]:
     return out
 
 
-def _fetch_universe_ohlcv(period: str = "1mo") -> dict[str, pd.DataFrame]:
-    """Fetch OHLCV for Nifty 50 + Midcap universe in one batch.
-
-    Returns dict NSE-symbol -> DataFrame (with `close`, `volume`, `date`).
-    """
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="Building market heatmap...")
+def _load_midcap_changes(_bucket: str = "") -> pd.DataFrame:
+    """Fetch Midcap-only OHLCV and compute DoD/WoW. Cached on the same minute
+    bucket as the main snapshot so the two stay in lockstep."""
+    del _bucket
     from config.midcap_tickers import MIDCAP_STOCKS
 
-    fetcher = YahooFetcher(max_retries=2, retry_delay=1.0)
-    nifty = fetcher.fetch_recent_ohlcv(period=period) or {}
-
-    mc_map = {sym: yt for sym, (yt, _, _) in MIDCAP_STOCKS.items() if sym not in nifty}
+    mc_map = {sym: yt for sym, (yt, _, _) in MIDCAP_STOCKS.items()}
     if not mc_map:
-        return nifty
+        return pd.DataFrame()
 
     try:
         data = yf.download(
             " ".join(mc_map.values()),
-            period=period,
+            period="1mo",
             interval="1d",
             group_by="ticker",
             auto_adjust=True,
@@ -708,12 +705,13 @@ def _fetch_universe_ohlcv(period: str = "1mo") -> dict[str, pd.DataFrame]:
         )
     except Exception as e:
         logger.warning(f"Midcap batch fetch failed: {e}")
-        return nifty
+        return pd.DataFrame()
 
     if data is None or data.empty:
-        return nifty
+        return pd.DataFrame()
 
-    for sym, yt in mc_map.items():
+    rows = []
+    for sym, (yt, name, sec) in MIDCAP_STOCKS.items():
         try:
             if isinstance(data.columns, pd.MultiIndex):
                 level_0 = data.columns.get_level_values(0).unique().tolist()
@@ -726,82 +724,81 @@ def _fetch_universe_ohlcv(period: str = "1mo") -> dict[str, pd.DataFrame]:
                     continue
             else:
                 sub = data.copy()
+
             sub.columns = [str(c).lower() for c in sub.columns]
             if "close" not in sub.columns:
                 continue
-            sub = sub.reset_index().rename(columns={"Date": "date", "index": "date"})
+
+            sub = sub.reset_index()
             sub.columns = [str(c).lower() for c in sub.columns]
-            nifty[sym] = sub
+
+            closes = sub["close"].dropna()
+            if len(closes) < 2:
+                continue
+
+            latest = float(closes.iloc[-1])
+            prev = float(closes.iloc[-2])
+            dod = ((latest - prev) / prev) * 100 if prev else 0.0
+
+            date_col = "date" if "date" in sub.columns else None
+            dates_for_close = sub.loc[closes.index, date_col] if date_col else None
+            wow = _week_pct_change(closes, dates_for_close)
+
+            vol = int(sub["volume"].iloc[-1]) if "volume" in sub.columns and pd.notna(sub["volume"].iloc[-1]) else 0
+
+            rows.append({
+                "symbol": sym,
+                "company": name,
+                "sector": sec or "Other",
+                "close": round(latest, 2),
+                "dod_pct": round(dod, 2),
+                "wow_pct": round(wow, 2),
+                "volume": vol,
+            })
         except Exception:
             continue
 
-    return nifty
+    return pd.DataFrame(rows)
 
 
-@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="Building market heatmap...")
-def load_heatmap_data(view: str = "daily", _bucket: str = "") -> pd.DataFrame:
-    """Return a DataFrame for the heatmap: Nifty 50 + Midcap, sized by mcap.
+def load_heatmap_data(view: str = "daily", snapshot: "MarketSnapshot | None" = None) -> pd.DataFrame:
+    """Return a DataFrame for the heatmap: Nifty 50 + Midcap.
 
-    Columns: symbol, company, sector, close, dod_pct, wow_pct, market_cap,
-    volume, size (market_cap with liquidity fallback so a stock without a
-    fetched mcap still renders proportionally).
+    Nifty 50 numbers come straight from `snapshot.stock_changes` (exactly what
+    every other component sees) so DoD/WoW match the rest of the dashboard.
+    Midcaps are loaded via a separate cached fetcher that honours the same
+    minute-bucket cache key.
+
+    Columns: symbol, company, sector, close, dod_pct, wow_pct, volume,
+    market_cap, size.
     """
-    del _bucket
+    del view  # only used for display; computation covers both DoD + WoW
     from config.midcap_tickers import MIDCAP_STOCKS
 
-    name_sector: dict[str, tuple[str, str]] = {}
-    for sym, (_, name, sec) in NIFTY50_STOCKS.items():
-        name_sector[sym] = (name, sec)
-    for sym, (_, name, sec) in MIDCAP_STOCKS.items():
-        name_sector.setdefault(sym, (name, sec))
+    nifty_df: pd.DataFrame
+    if snapshot is not None and not snapshot.stock_changes.empty:
+        cols = ["symbol", "company", "sector", "close", "dod_pct", "wow_pct", "volume"]
+        nifty_df = snapshot.stock_changes[cols].copy()
+    else:
+        nifty_df = pd.DataFrame()
+
+    midcap_df = _load_midcap_changes(_bucket=_market_minute_bucket())
+
+    if nifty_df.empty and midcap_df.empty:
+        return pd.DataFrame()
+
+    df = pd.concat([nifty_df, midcap_df], ignore_index=True)
+    # If a midcap symbol overlaps with Nifty 50 (post-rebalance), keep snapshot row.
+    df = df.drop_duplicates(subset=["symbol"], keep="first")
+    df["sector"] = df["sector"].fillna("Other")
 
     today = date.today()
     day_bucket = (today if is_trading_day(today) else prev_trading_day(today)).isoformat()
     mcaps = _fetch_market_caps(_day_bucket=day_bucket)
+    df["market_cap"] = df["symbol"].map(mcaps).fillna(0.0)
 
-    universe_data = _fetch_universe_ohlcv(period="1mo")
-    if not universe_data:
-        return pd.DataFrame()
+    # Liquidity fallback so a stock without a fetched cap still gets a tile.
+    liquidity = (df["close"].astype(float) * df["volume"].astype(float)).replace(0, 1.0)
+    df["size"] = df["market_cap"].where(df["market_cap"] > 0, liquidity)
 
-    rows = []
-    for sym, df in universe_data.items():
-        if df is None or df.empty:
-            continue
-        if "close" not in df.columns:
-            continue
-        closes = df["close"].dropna()
-        if len(closes) < 2:
-            continue
-
-        latest = float(closes.iloc[-1])
-        prev = float(closes.iloc[-2])
-        dod = ((latest - prev) / prev) * 100 if prev else 0.0
-
-        date_col = "date" if "date" in df.columns else None
-        dates_for_close = df.loc[closes.index, date_col] if date_col else None
-        wow = _week_pct_change(closes, dates_for_close)
-
-        vol_series = df["volume"].dropna() if "volume" in df.columns else pd.Series(dtype=float)
-        avg_vol = float(vol_series.tail(20).mean()) if not vol_series.empty else 0.0
-        liquidity = latest * avg_vol  # ₹ traded value ~ liquidity proxy
-
-        name, sector = name_sector.get(sym, (sym, "Other"))
-        mcap = float(mcaps.get(sym, 0.0))
-        size = mcap if mcap > 0 else max(liquidity, 1.0)
-
-        rows.append({
-            "symbol": sym,
-            "company": name,
-            "sector": sector or "Other",
-            "close": round(latest, 2),
-            "dod_pct": round(dod, 2),
-            "wow_pct": round(wow, 2),
-            "market_cap": mcap,
-            "volume": int(vol_series.iloc[-1]) if not vol_series.empty else 0,
-            "size": float(size),
-        })
-
-    if not rows:
-        return pd.DataFrame()
-
-    return pd.DataFrame(rows)
+    return df

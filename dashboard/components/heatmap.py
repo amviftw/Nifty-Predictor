@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from dashboard.data_loader import load_heatmap_data, _market_minute_bucket
+from dashboard.data_loader import load_heatmap_data, MarketSnapshot
 
 
 # Symmetric red ↔ neutral ↔ green colourscale, anchored at 0%.
@@ -27,20 +27,30 @@ _COLORSCALE = [
 ]
 
 
-def render_heatmap(view: str = "daily"):
-    """Render the full-market heatmap inside a tab."""
+def render_heatmap(view: str = "daily", snapshot: MarketSnapshot | None = None):
+    """Render the full-market heatmap inside a tab.
+
+    `snapshot` carries the Nifty 50 stock changes already computed by
+    `load_market_snapshot` — reusing them guarantees the heatmap shows the
+    same DoD / WoW numbers as Top Movers and the rest of the dashboard.
+    """
     st.markdown("#### Market Heatmap")
+    as_of = snapshot.last_trading_date if snapshot else ""
+    as_of_html = (
+        f' &middot; <span style="color:#c9cfd9;">As of {as_of}</span>'
+        if as_of else ""
+    )
     st.markdown(
         '<div style="font-size:0.78rem;color:#7a8294;margin-top:-4px;margin-bottom:10px;">'
         "Nifty 50 + curated Midcap universe, clustered by sector. "
         "Tile size = market cap, colour = "
-        f"{'day' if view == 'daily' else 'week'} % change. "
-        "Hover any tile for details."
+        f"{'day' if view == 'daily' else 'week'} % change."
+        f"{as_of_html}"
         "</div>",
         unsafe_allow_html=True,
     )
 
-    df = load_heatmap_data(view=view, _bucket=_market_minute_bucket())
+    df = load_heatmap_data(view=view, snapshot=snapshot)
     if df is None or df.empty:
         st.info("Heatmap data unavailable — try refreshing in a moment.")
         return
@@ -118,18 +128,30 @@ def _build_treemap(df: pd.DataFrame, chg_col: str, view: str, clip: float) -> go
     ids: list[str] = [root_label]
     values: list[float] = [float(df["size"].sum())]
     colors: list[float] = [0.0]
-    custom: list[list] = [["", "", "", "", "", ""]]
+    # customdata[0] = pre-rendered hover text. Keeps hover useful at every
+    # level (root / sector / stock) with a single hovertemplate.
+    chg_label = "DoD" if view == "daily" else "WoW"
+    custom: list[list] = [[
+        f"<b>Indian Market</b><br>"
+        f"{len(df)} stocks across {len(sector_agg)} sectors"
+    ]]
 
     # Sector parents
     sector_agg = sector_agg.sort_values("score", ascending=False)
     for _, r in sector_agg.iterrows():
         sec = str(r["sector"])
+        score = float(r["score"])
         labels.append(sec)
         parents.append(root_label)
         ids.append(f"sec::{sec}")
         values.append(float(r["size"]))
-        colors.append(float(r["score"]))
-        custom.append([sec, "", "", "", "", ""])
+        colors.append(score)
+        sec_count = int((df["sector"] == sec).sum())
+        custom.append([
+            f"<b>{sec}</b><br>"
+            f"{sec_count} stocks &middot; mcap-weighted {chg_label}: "
+            f"{score:+.1f}%"
+        ])
 
     # Stock leaves — sort within sector by size desc so big names dominate
     df_sorted = df.sort_values(["sector_score", "size"], ascending=[False, False])
@@ -143,15 +165,14 @@ def _build_treemap(df: pd.DataFrame, chg_col: str, view: str, clip: float) -> go
         colors.append(float(r[chg_col]))
         mcap_str = _format_inr_crore(float(r.get("market_cap", 0) or 0))
         custom.append([
-            r["company"],
-            sec,
-            f"{r['close']:,.2f}",
-            f"{r['dod_pct']:+.2f}%",
-            f"{r['wow_pct']:+.2f}%",
-            mcap_str,
+            f"<b>{sym}</b> &nbsp; {r['company']}<br>"
+            f"Sector: {sec}<br>"
+            f"Close: ₹{r['close']:,.2f}<br>"
+            f"DoD: {r['dod_pct']:+.1f}% &nbsp; WoW: {r['wow_pct']:+.1f}%<br>"
+            f"Mcap: {mcap_str}"
         ])
 
-    # Tile text: "SYMBOL\n+1.23%" — only on stock leaves (sectors get their name)
+    # Tile text: "SYMBOL\n+1.2%" — only on stock leaves (sectors get their name)
     chg_by_id = dict(zip(ids, colors))
     text = []
     for lbl, parent, _id in zip(labels, parents, ids):
@@ -160,7 +181,7 @@ def _build_treemap(df: pd.DataFrame, chg_col: str, view: str, clip: float) -> go
         else:
             stk_chg = chg_by_id.get(_id, 0.0)
             sign = "+" if stk_chg >= 0 else ""
-            text.append(f"<b>{lbl}</b><br>{sign}{stk_chg:.2f}%")
+            text.append(f"<b>{lbl}</b><br>{sign}{stk_chg:.1f}%")
 
     fig = go.Figure(go.Treemap(
         labels=labels,
@@ -169,7 +190,9 @@ def _build_treemap(df: pd.DataFrame, chg_col: str, view: str, clip: float) -> go
         values=values,
         text=text,
         textinfo="text",
+        textposition="middle center",
         textfont=dict(family="Inter, sans-serif", size=13, color="#f3f5f9"),
+        insidetextfont=dict(family="Inter, sans-serif", size=13, color="#f3f5f9"),
         branchvalues="total",
         marker=dict(
             colors=colors,
@@ -191,13 +214,11 @@ def _build_treemap(df: pd.DataFrame, chg_col: str, view: str, clip: float) -> go
             ),
         ),
         customdata=custom,
-        hovertemplate=(
-            "<b>%{label}</b> &nbsp; %{customdata[0]}<br>"
-            "Sector: %{customdata[1]}<br>"
-            "Close: ₹%{customdata[2]}<br>"
-            "DoD: %{customdata[3]} &nbsp; WoW: %{customdata[4]}<br>"
-            "Mcap: %{customdata[5]}"
-            "<extra></extra>"
+        hovertemplate="%{customdata[0]}<extra></extra>",
+        hoverlabel=dict(
+            bgcolor="#0f131c",
+            bordercolor="#2f3645",
+            font=dict(family="Inter, sans-serif", size=12, color="#e8ecf1"),
         ),
         pathbar=dict(
             visible=True,
@@ -254,21 +275,21 @@ def _render_summary_strip(df: pd.DataFrame, chg_col: str, view: str):
     cols[1].markdown(_pill_card(
         f"Strongest sector ({label})",
         best_sec or "—",
-        f"{best_sec_pct:+.2f}% mcap-weighted",
+        f"{best_sec_pct:+.1f}% mcap-weighted",
         accent="#00d09c" if best_sec_pct >= 0 else "#eb5757",
     ), unsafe_allow_html=True)
 
     cols[2].markdown(_pill_card(
         f"Weakest sector ({label})",
         worst_sec or "—",
-        f"{worst_sec_pct:+.2f}% mcap-weighted",
+        f"{worst_sec_pct:+.1f}% mcap-weighted",
         accent="#eb5757" if worst_sec_pct < 0 else "#00d09c",
     ), unsafe_allow_html=True)
 
     cols[3].markdown(_pill_card(
         f"Top mover ({label})",
-        f"{top_stock['symbol']} &nbsp; {top_stock[chg_col]:+.2f}%",
-        f"vs {bot_stock['symbol']} {bot_stock[chg_col]:+.2f}%",
+        f"{top_stock['symbol']} &nbsp; {top_stock[chg_col]:+.1f}%",
+        f"vs {bot_stock['symbol']} {bot_stock[chg_col]:+.1f}%",
         accent="#00d09c",
     ), unsafe_allow_html=True)
 

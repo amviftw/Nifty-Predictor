@@ -449,7 +449,7 @@ def main():
         render_top_movers(snapshot)
 
     with tab_heatmap:
-        render_heatmap(view=view_key)
+        render_heatmap(view=view_key, snapshot=snapshot)
 
     with tab_sectors:
         render_sectoral_heatmap(snapshot)
