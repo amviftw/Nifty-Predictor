@@ -211,6 +211,66 @@ def _market_minute_bucket() -> str:
     return f"closed-{last_session.isoformat()}-{half}"
 
 
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+def _fetch_live_quotes_cached(_bucket: str = "") -> dict[str, dict]:
+    """Live-quote overlay used to compute DoD across the dashboard.
+
+    Yahoo's daily candle for Indian tickers commonly lags by a full session
+    (i.e. `yf.download(period="1mo", interval="1d")` may not include today's
+    close until well after market close). That makes `iloc[-1] / iloc[-2]`
+    surface yesterday's DoD as if it were today's. fast_info hits the live
+    quote endpoint which stays current through the session, so we use it as
+    the source of truth for "latest price" and "previous-day close".
+
+    Universe: Nifty 50 + Midcap stocks + Nifty 50 index + India VIX + USD/INR.
+    Cached on the same minute bucket as load_market_snapshot.
+    """
+    del _bucket
+    from config.midcap_tickers import MIDCAP_STOCKS
+
+    fetcher = YahooFetcher(max_retries=1, retry_delay=0.5)
+
+    yt_list: list[str] = []
+    yt_to_sym: dict[str, str] = {}
+    for sym, (yt, _, _) in NIFTY50_STOCKS.items():
+        yt_list.append(yt)
+        yt_to_sym[yt] = sym
+    for sym, (yt, _, _) in MIDCAP_STOCKS.items():
+        if yt not in yt_to_sym:
+            yt_list.append(yt)
+            yt_to_sym[yt] = sym
+    # Indices the chips care about
+    for yt in ("^NSEI", "^INDIAVIX", "INR=X"):
+        yt_list.append(yt)
+        yt_to_sym[yt] = yt
+
+    raw = fetcher.fetch_live_quotes(yt_list)
+
+    # Re-key by NSE symbol where possible (and keep raw yt keys for indices)
+    out: dict[str, dict] = {}
+    for yt, q in raw.items():
+        out[yt] = q
+        sym = yt_to_sym.get(yt)
+        if sym and sym != yt:
+            out[sym] = q
+    return out
+
+
+def _apply_live_quote(
+    closes: pd.Series, quote: dict | None
+) -> tuple[float, float, bool]:
+    """Return (latest, prev_close, used_live).
+
+    If a live quote is available, use it; otherwise fall back to the last
+    two non-null entries in the historical close series.
+    """
+    if quote and quote.get("last_price") and quote.get("previous_close"):
+        return float(quote["last_price"]), float(quote["previous_close"]), True
+    if len(closes) >= 2:
+        return float(closes.iloc[-1]), float(closes.iloc[-2]), False
+    return 0.0, 0.0, False
+
+
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="Fetching live market data...")
 def load_market_snapshot(view: str = "daily", _bucket: str = "") -> MarketSnapshot:
     """Master function: fetches all data and returns a MarketSnapshot.
@@ -234,17 +294,23 @@ def load_market_snapshot(view: str = "daily", _bucket: str = "") -> MarketSnapsh
         last_trading_date=trading_day.isoformat(),
     )
 
+    # Fetch live-quote overlay first; everything below uses it as the
+    # source-of-truth for "latest" and "previous close" so DoD is correct
+    # even when Yahoo's daily candle hasn't rolled forward yet.
+    live_quotes = _fetch_live_quotes_cached(_bucket=_bucket)
+
     # Fetch all data sources (sequentially to avoid rate-limiting)
-    _populate_stock_data(snapshot, period)
-    _populate_macro_data(snapshot, period)
+    _populate_stock_data(snapshot, period, live_quotes)
+    _populate_macro_data(snapshot, period, live_quotes)
     _populate_sectoral_data(snapshot, period)
     _populate_supply_chain(snapshot, period)
 
     return snapshot
 
 
-def _populate_stock_data(snapshot: MarketSnapshot, period: str):
+def _populate_stock_data(snapshot: MarketSnapshot, period: str, live_quotes: dict | None = None):
     """Fetch Nifty 50 stock prices and compute movers."""
+    live_quotes = live_quotes or {}
     try:
         fetcher = YahooFetcher(max_retries=2, retry_delay=1.0)
         stock_data = fetcher.fetch_recent_ohlcv(period=period)
@@ -267,19 +333,17 @@ def _populate_stock_data(snapshot: MarketSnapshot, period: str):
             if len(closes) < 2:
                 continue
 
-            latest_close = float(closes.iloc[-1])
-            prev_close = float(closes.iloc[-2])
+            latest_close, prev_close, _ = _apply_live_quote(closes, live_quotes.get(symbol))
             dod_pct = ((latest_close - prev_close) / prev_close) * 100 if prev_close else 0
 
-            # WoW: change since prior calendar week's last close.
-            # Stock dataframes from YahooFetcher have been reset_index()'d, so the
-            # date lives in a "date" column rather than the Series index — pass it
-            # through explicitly so _week_pct_change can anchor on Monday boundary.
+            # WoW + MoM: anchor pulled from historical, latest taken from the
+            # live quote (above). Splitting the two keeps WoW correct even
+            # when Yahoo's day-of candle hasn't rolled forward.
             date_col = "date" if "date" in df.columns else None
             dates_for_close = df.loc[closes.index, date_col] if date_col else None
-            wow_pct = _week_pct_change(closes, dates_for_close)
+            _, wow_anchor, _ = _week_pct_change_full(closes, dates_for_close)
+            wow_pct = ((latest_close - wow_anchor) / wow_anchor) * 100 if wow_anchor else 0.0
 
-            # MoM: first available vs latest
             mom_pct = 0.0
             if len(closes) >= 15:
                 month_ago_close = float(closes.iloc[0])
@@ -324,17 +388,18 @@ def _populate_stock_data(snapshot: MarketSnapshot, period: str):
         logger.error(f"Stock data fetch failed: {e}")
 
 
-def _populate_macro_data(snapshot: MarketSnapshot, period: str):
+def _populate_macro_data(snapshot: MarketSnapshot, period: str, live_quotes: dict | None = None):
     """Fetch global indices, VIX, USD/INR, FII/DII.
 
     Critical KPIs (Nifty 50, VIX, USD/INR) are fetched individually for
     reliability — yfinance batch downloads silently drop Indian indices.
     Global indices (S&P, NASDAQ, etc.) still use the batch fetcher.
     """
+    live_quotes = live_quotes or {}
     # --- Critical KPIs: individual fetches ---
-    _fetch_nifty50(snapshot, period)
-    _fetch_india_vix(snapshot, period)
-    _fetch_usdinr(snapshot, period)
+    _fetch_nifty50(snapshot, period, live_quotes.get("^NSEI"))
+    _fetch_india_vix(snapshot, period, live_quotes.get("^INDIAVIX"))
+    _fetch_usdinr(snapshot, period, live_quotes.get("INR=X"))
 
     # --- Global indices: fetch individually for reliable price + DoD + WoW + sparkline.
     # Batch yfinance calls silently drop some international indices, and we need
@@ -437,36 +502,35 @@ def _fetch_single_ticker(ticker: str, period: str) -> pd.Series:
         return pd.Series(dtype=float)
 
 
-def _fetch_nifty50(snapshot: MarketSnapshot, period: str):
+def _fetch_nifty50(snapshot: MarketSnapshot, period: str, live_quote: dict | None = None):
     """Fetch Nifty 50 index close and compute day/week changes."""
     closes = _fetch_single_ticker("^NSEI", period)
     if len(closes) < 2:
         return
 
-    latest = float(closes.iloc[-1])
-    prev = float(closes.iloc[-2])
+    latest, prev, _ = _apply_live_quote(closes, live_quote)
     snapshot.nifty50_close = latest
     snapshot.nifty50_change_pct = ((latest - prev) / prev) * 100 if prev else 0
 
-    wow_pct, anchor_close, anchor_date = _week_pct_change_full(closes)
-    snapshot.nifty50_wow_pct = wow_pct
+    _, anchor_close, anchor_date = _week_pct_change_full(closes)
+    snapshot.nifty50_wow_pct = ((latest - anchor_close) / anchor_close) * 100 if anchor_close else 0.0
     snapshot.nifty50_wow_anchor_close = anchor_close
     snapshot.nifty50_wow_anchor_date = anchor_date
 
 
-def _fetch_india_vix(snapshot: MarketSnapshot, period: str):
+def _fetch_india_vix(snapshot: MarketSnapshot, period: str, live_quote: dict | None = None):
     """Fetch India VIX."""
     closes = _fetch_single_ticker("^INDIAVIX", period)
     if len(closes) < 2:
         return
 
-    snapshot.india_vix = float(closes.iloc[-1])
-    prev = float(closes.iloc[-2])
+    latest, prev, _ = _apply_live_quote(closes, live_quote)
+    snapshot.india_vix = latest
     if prev:
-        snapshot.india_vix_change = ((snapshot.india_vix - prev) / prev) * 100
+        snapshot.india_vix_change = ((latest - prev) / prev) * 100
 
-    wow_pct, anchor_close, anchor_date = _week_pct_change_full(closes)
-    snapshot.india_vix_wow_pct = wow_pct
+    _, anchor_close, anchor_date = _week_pct_change_full(closes)
+    snapshot.india_vix_wow_pct = ((latest - anchor_close) / anchor_close) * 100 if anchor_close else 0.0
     snapshot.india_vix_wow_anchor_close = anchor_close
     snapshot.india_vix_wow_anchor_date = anchor_date
 
@@ -475,19 +539,19 @@ def _fetch_india_vix(snapshot: MarketSnapshot, period: str):
     snapshot.vix_series = pd.DataFrame(vix_data).set_index("date") if vix_data else pd.DataFrame()
 
 
-def _fetch_usdinr(snapshot: MarketSnapshot, period: str):
+def _fetch_usdinr(snapshot: MarketSnapshot, period: str, live_quote: dict | None = None):
     """Fetch USD/INR exchange rate."""
     closes = _fetch_single_ticker("INR=X", period)
     if len(closes) < 2:
         return
 
-    snapshot.usdinr = float(closes.iloc[-1])
-    prev = float(closes.iloc[-2])
+    latest, prev, _ = _apply_live_quote(closes, live_quote)
+    snapshot.usdinr = latest
     if prev:
-        snapshot.usdinr_change = ((snapshot.usdinr - prev) / prev) * 100
+        snapshot.usdinr_change = ((latest - prev) / prev) * 100
 
-    wow_pct, anchor_close, anchor_date = _week_pct_change_full(closes)
-    snapshot.usdinr_wow_pct = wow_pct
+    _, anchor_close, anchor_date = _week_pct_change_full(closes)
+    snapshot.usdinr_wow_pct = ((latest - anchor_close) / anchor_close) * 100 if anchor_close else 0.0
     snapshot.usdinr_wow_anchor_close = anchor_close
     snapshot.usdinr_wow_anchor_date = anchor_date
 
@@ -686,8 +750,9 @@ def _fetch_market_caps(_day_bucket: str = "") -> dict[str, float]:
 def _load_midcap_changes(_bucket: str = "") -> pd.DataFrame:
     """Fetch Midcap-only OHLCV and compute DoD/WoW. Cached on the same minute
     bucket as the main snapshot so the two stay in lockstep."""
-    del _bucket
     from config.midcap_tickers import MIDCAP_STOCKS
+
+    live_quotes = _fetch_live_quotes_cached(_bucket=_bucket)
 
     mc_map = {sym: yt for sym, (yt, _, _) in MIDCAP_STOCKS.items()}
     if not mc_map:
@@ -736,13 +801,13 @@ def _load_midcap_changes(_bucket: str = "") -> pd.DataFrame:
             if len(closes) < 2:
                 continue
 
-            latest = float(closes.iloc[-1])
-            prev = float(closes.iloc[-2])
+            latest, prev, _ = _apply_live_quote(closes, live_quotes.get(sym))
             dod = ((latest - prev) / prev) * 100 if prev else 0.0
 
             date_col = "date" if "date" in sub.columns else None
             dates_for_close = sub.loc[closes.index, date_col] if date_col else None
-            wow = _week_pct_change(closes, dates_for_close)
+            _, anchor_close, _ = _week_pct_change_full(closes, dates_for_close)
+            wow = ((latest - anchor_close) / anchor_close) * 100 if anchor_close else 0.0
 
             vol = int(sub["volume"].iloc[-1]) if "volume" in sub.columns and pd.notna(sub["volume"].iloc[-1]) else 0
 

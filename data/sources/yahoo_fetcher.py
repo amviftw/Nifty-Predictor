@@ -306,6 +306,73 @@ class YahooFetcher:
         logger.info(f"Fetched fundamentals for {len(results)}/{len(symbols)} stocks")
         return results
 
+    @staticmethod
+    def _read_fast_info(fi, attrs: tuple[str, ...]):
+        """Pull the first non-null value from a yfinance fast_info object.
+
+        fast_info exposes both attribute and dict-style access depending on
+        the yfinance version, and the field names changed (`last_price` vs
+        `lastPrice`). Try every variant before giving up.
+        """
+        for a in attrs:
+            try:
+                v = fi.get(a) if hasattr(fi, "get") else None
+            except Exception:
+                v = None
+            if v is None:
+                v = getattr(fi, a, None)
+            if v is not None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    continue
+        return None
+
+    def fetch_live_quotes(
+        self, yahoo_tickers: list[str], max_workers: int = 16
+    ) -> dict[str, dict]:
+        """Fetch live last price + prior-day close via Yahoo's fast_info.
+
+        Why this matters: `yf.download(period="1mo", interval="1d")` returns
+        the daily candle, and Yahoo's daily candle for Indian tickers can lag
+        by a session — meaning iloc[-1] is yesterday's close and the dashboard
+        shows yesterday's DoD. fast_info hits the live-quote endpoint instead,
+        which is updated through the session, so it's the right source for
+        "today's price" and "previous-day's settled close".
+
+        Returns: {yahoo_ticker: {"last_price", "previous_close"}}.
+        Tickers that fail are silently dropped — the caller should fall back
+        to the historical OHLCV path.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        last_attrs = (
+            "last_price", "lastPrice",
+            "regular_market_price", "regularMarketPrice",
+        )
+        prev_attrs = (
+            "previous_close", "previousClose",
+            "regular_market_previous_close", "regularMarketPreviousClose",
+        )
+
+        def _one(yt: str):
+            try:
+                fi = yf.Ticker(yt).fast_info
+                last = self._read_fast_info(fi, last_attrs)
+                prev = self._read_fast_info(fi, prev_attrs)
+                if last and prev and last > 0 and prev > 0:
+                    return yt, {"last_price": last, "previous_close": prev}
+            except Exception:
+                pass
+            return yt, None
+
+        out: dict[str, dict] = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            for yt, q in ex.map(_one, yahoo_tickers):
+                if q:
+                    out[yt] = q
+        return out
+
     def ohlcv_to_records(self, symbol: str, df: pd.DataFrame) -> list[dict]:
         """Convert a DataFrame to list of dicts for DB insertion."""
         records = []
