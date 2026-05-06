@@ -24,6 +24,7 @@ from dashboard.components.target_hunter import render_target_hunter
 from dashboard.components.ema_chart import render_ema_chart
 from dashboard.components.sector_momentum import render_sector_momentum
 from dashboard.components.scenario_lab import render_scenario_lab
+from dashboard.components.heatmap import render_heatmap
 
 
 _CUSTOM_CSS = """
@@ -434,8 +435,9 @@ def main():
 
     st.markdown('<div style="margin-top:24px;"></div>', unsafe_allow_html=True)
 
-    tab_market, tab_sectors, tab_macro, tab_signals = st.tabs([
+    tab_market, tab_heatmap, tab_sectors, tab_macro, tab_signals = st.tabs([
         "Market",
+        "Heatmap",
         "Sectors",
         "Macro & Global",
         "Signals",
@@ -445,6 +447,9 @@ def main():
         render_ema_chart(view=view_key)
         _spacer()
         render_top_movers(snapshot)
+
+    with tab_heatmap:
+        render_heatmap(view=view_key)
 
     with tab_sectors:
         render_sectoral_heatmap(snapshot)

@@ -631,3 +631,177 @@ def _populate_supply_chain(snapshot: MarketSnapshot, period: str):
 
     except Exception as e:
         logger.error(f"Supply chain data fetch failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Heatmap universe loader (Nifty 50 + Midcap, sized by market cap)
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _fetch_market_caps(_day_bucket: str = "") -> dict[str, float]:
+    """Fetch market caps for the heatmap universe. Cached for 24h.
+
+    Market cap is structurally stable intraday — refreshing daily is plenty.
+    `fast_info` is preferred (orders of magnitude faster than `.info`); we
+    fall back to `.info` only when fast_info doesn't surface a cap.
+    """
+    del _day_bucket
+    from concurrent.futures import ThreadPoolExecutor
+    from config.midcap_tickers import MIDCAP_STOCKS
+
+    universe: dict[str, str] = {}
+    for sym, (yt, _, _) in NIFTY50_STOCKS.items():
+        universe[sym] = yt
+    for sym, (yt, _, _) in MIDCAP_STOCKS.items():
+        universe.setdefault(sym, yt)
+
+    def _one(item):
+        sym, tkr = item
+        try:
+            t = yf.Ticker(tkr)
+            mc = None
+            try:
+                fi = t.fast_info
+                mc = getattr(fi, "market_cap", None) or (fi.get("market_cap") if hasattr(fi, "get") else None)
+            except Exception:
+                mc = None
+            if not mc:
+                try:
+                    mc = t.info.get("marketCap")
+                except Exception:
+                    mc = None
+            return sym, float(mc) if mc else None
+        except Exception:
+            return sym, None
+
+    out: dict[str, float] = {}
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        for sym, mc in ex.map(_one, universe.items()):
+            if mc and mc > 0:
+                out[sym] = mc
+    return out
+
+
+def _fetch_universe_ohlcv(period: str = "1mo") -> dict[str, pd.DataFrame]:
+    """Fetch OHLCV for Nifty 50 + Midcap universe in one batch.
+
+    Returns dict NSE-symbol -> DataFrame (with `close`, `volume`, `date`).
+    """
+    from config.midcap_tickers import MIDCAP_STOCKS
+
+    fetcher = YahooFetcher(max_retries=2, retry_delay=1.0)
+    nifty = fetcher.fetch_recent_ohlcv(period=period) or {}
+
+    mc_map = {sym: yt for sym, (yt, _, _) in MIDCAP_STOCKS.items() if sym not in nifty}
+    if not mc_map:
+        return nifty
+
+    try:
+        data = yf.download(
+            " ".join(mc_map.values()),
+            period=period,
+            interval="1d",
+            group_by="ticker",
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+        )
+    except Exception as e:
+        logger.warning(f"Midcap batch fetch failed: {e}")
+        return nifty
+
+    if data is None or data.empty:
+        return nifty
+
+    for sym, yt in mc_map.items():
+        try:
+            if isinstance(data.columns, pd.MultiIndex):
+                level_0 = data.columns.get_level_values(0).unique().tolist()
+                level_1 = data.columns.get_level_values(1).unique().tolist()
+                if yt in level_0:
+                    sub = data[yt].copy()
+                elif yt in level_1:
+                    sub = data.xs(yt, level=1, axis=1).copy()
+                else:
+                    continue
+            else:
+                sub = data.copy()
+            sub.columns = [str(c).lower() for c in sub.columns]
+            if "close" not in sub.columns:
+                continue
+            sub = sub.reset_index().rename(columns={"Date": "date", "index": "date"})
+            sub.columns = [str(c).lower() for c in sub.columns]
+            nifty[sym] = sub
+        except Exception:
+            continue
+
+    return nifty
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="Building market heatmap...")
+def load_heatmap_data(view: str = "daily", _bucket: str = "") -> pd.DataFrame:
+    """Return a DataFrame for the heatmap: Nifty 50 + Midcap, sized by mcap.
+
+    Columns: symbol, company, sector, close, dod_pct, wow_pct, market_cap,
+    volume, size (market_cap with liquidity fallback so a stock without a
+    fetched mcap still renders proportionally).
+    """
+    del _bucket
+    from config.midcap_tickers import MIDCAP_STOCKS
+
+    name_sector: dict[str, tuple[str, str]] = {}
+    for sym, (_, name, sec) in NIFTY50_STOCKS.items():
+        name_sector[sym] = (name, sec)
+    for sym, (_, name, sec) in MIDCAP_STOCKS.items():
+        name_sector.setdefault(sym, (name, sec))
+
+    today = date.today()
+    day_bucket = (today if is_trading_day(today) else prev_trading_day(today)).isoformat()
+    mcaps = _fetch_market_caps(_day_bucket=day_bucket)
+
+    universe_data = _fetch_universe_ohlcv(period="1mo")
+    if not universe_data:
+        return pd.DataFrame()
+
+    rows = []
+    for sym, df in universe_data.items():
+        if df is None or df.empty:
+            continue
+        if "close" not in df.columns:
+            continue
+        closes = df["close"].dropna()
+        if len(closes) < 2:
+            continue
+
+        latest = float(closes.iloc[-1])
+        prev = float(closes.iloc[-2])
+        dod = ((latest - prev) / prev) * 100 if prev else 0.0
+
+        date_col = "date" if "date" in df.columns else None
+        dates_for_close = df.loc[closes.index, date_col] if date_col else None
+        wow = _week_pct_change(closes, dates_for_close)
+
+        vol_series = df["volume"].dropna() if "volume" in df.columns else pd.Series(dtype=float)
+        avg_vol = float(vol_series.tail(20).mean()) if not vol_series.empty else 0.0
+        liquidity = latest * avg_vol  # ₹ traded value ~ liquidity proxy
+
+        name, sector = name_sector.get(sym, (sym, "Other"))
+        mcap = float(mcaps.get(sym, 0.0))
+        size = mcap if mcap > 0 else max(liquidity, 1.0)
+
+        rows.append({
+            "symbol": sym,
+            "company": name,
+            "sector": sector or "Other",
+            "close": round(latest, 2),
+            "dod_pct": round(dod, 2),
+            "wow_pct": round(wow, 2),
+            "market_cap": mcap,
+            "volume": int(vol_series.iloc[-1]) if not vol_series.empty else 0,
+            "size": float(size),
+        })
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows)
