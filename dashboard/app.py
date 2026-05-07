@@ -19,10 +19,10 @@ from dashboard.components.top_movers import render_top_movers
 from dashboard.components.macro_panel import render_macro_panel
 from dashboard.components.global_factors import render_global_indices, render_supply_chain
 from dashboard.components.sector_deep_dive import render_sector_deep_dive
-from dashboard.components.predictions_panel import render_predictions_panel
 from dashboard.components.target_hunter import render_target_hunter
 from dashboard.components.ema_chart import render_ema_chart
 from dashboard.components.sector_momentum import render_sector_momentum
+from dashboard.components.sector_monthly_returns import render_sector_monthly_returns
 from dashboard.components.scenario_lab import render_scenario_lab
 from dashboard.components.heatmap import render_heatmap
 
@@ -435,12 +435,11 @@ def main():
 
     st.markdown('<div style="margin-top:24px;"></div>', unsafe_allow_html=True)
 
-    tab_market, tab_heatmap, tab_sectors, tab_macro, tab_signals = st.tabs([
+    tab_market, tab_heatmap, tab_sectors, tab_macro = st.tabs([
         "Market",
         "Heatmap",
         "Sectors",
         "Macro & Global",
-        "Signals",
     ])
 
     with tab_market:
@@ -454,6 +453,8 @@ def main():
     with tab_sectors:
         render_sectoral_heatmap(snapshot)
         _spacer()
+        render_sector_monthly_returns()
+        _spacer()
         render_sector_momentum()
         _spacer()
         render_sector_deep_dive(snapshot)
@@ -464,9 +465,6 @@ def main():
         render_global_indices(snapshot)
         _spacer()
         render_supply_chain(snapshot)
-
-    with tab_signals:
-        render_predictions_panel()
 
 
 def _spacer():

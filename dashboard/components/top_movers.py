@@ -6,21 +6,25 @@ import yfinance as yf
 import streamlit as st
 from loguru import logger
 
-from config.nifty50_tickers import NIFTY50_STOCKS, get_yahoo_tickers
 from dashboard.data_loader import MarketSnapshot, _market_minute_bucket
 from dashboard.config import CACHE_TTL_SECONDS
+from dashboard.universe import EXPANDED_UNIVERSE, get_universe_yahoo_tickers
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def _fetch_extended_metrics(_bucket: str = "") -> dict:
     """Batch-fetch 1Y data → RSI 14, volume ratio, 52-week high per stock.
 
+    Universe spans the full dashboard expanded universe (Nifty 50 + Next 50 +
+    Midcap) so the chip cards on top movers can show RSI / 52W / volume
+    context for any stock that surfaces as a top mover.
+
     `_bucket` is part of the cache key only — pass `_market_minute_bucket()`
-    so per-stock RSI/52W/volume metrics on the chip cards stay in sync with
-    the price coming from `load_market_snapshot`.
+    so per-stock metrics stay in sync with the price coming from
+    `load_market_snapshot`.
     """
     del _bucket
-    tickers = get_yahoo_tickers()
+    tickers = get_universe_yahoo_tickers()
     try:
         data = yf.download(
             " ".join(tickers), period="1y", interval="1d",
@@ -34,7 +38,7 @@ def _fetch_extended_metrics(_bucket: str = "") -> dict:
         return {}
 
     result = {}
-    for symbol, (yahoo_ticker, _company, _sector) in NIFTY50_STOCKS.items():
+    for symbol, (yahoo_ticker, _company, _sector) in EXPANDED_UNIVERSE.items():
         try:
             if isinstance(data.columns, pd.MultiIndex):
                 if yahoo_ticker not in data.columns.get_level_values(0):

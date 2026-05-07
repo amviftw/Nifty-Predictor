@@ -23,6 +23,10 @@ from config.nifty50_tickers import NIFTY50_STOCKS, GLOBAL_INDICES, get_yahoo_tic
 from config.holidays import is_trading_day, prev_trading_day, days_to_expiry, next_fno_expiry
 from data.sources.yahoo_fetcher import YahooFetcher
 from data.sources.nse_fetcher import NSEFetcher
+from dashboard.universe import (
+    EXPANDED_UNIVERSE,
+    get_universe_yahoo_tickers,
+)
 from dashboard.config import (
     SECTORAL_INDICES,
     SUPPLY_CHAIN_TICKERS,
@@ -222,20 +226,16 @@ def _fetch_live_quotes_cached(_bucket: str = "") -> dict[str, dict]:
     quote endpoint which stays current through the session, so we use it as
     the source of truth for "latest price" and "previous-day close".
 
-    Universe: Nifty 50 + Midcap stocks + Nifty 50 index + India VIX + USD/INR.
-    Cached on the same minute bucket as load_market_snapshot.
+    Universe: expanded (Nifty 50 + Next 50 + Midcap) + Nifty 50 index + India
+    VIX + USD/INR. Cached on the same minute bucket as load_market_snapshot.
     """
     del _bucket
-    from config.midcap_tickers import MIDCAP_STOCKS
 
     fetcher = YahooFetcher(max_retries=1, retry_delay=0.5)
 
     yt_list: list[str] = []
     yt_to_sym: dict[str, str] = {}
-    for sym, (yt, _, _) in NIFTY50_STOCKS.items():
-        yt_list.append(yt)
-        yt_to_sym[yt] = sym
-    for sym, (yt, _, _) in MIDCAP_STOCKS.items():
+    for sym, (yt, _, _) in EXPANDED_UNIVERSE.items():
         if yt not in yt_to_sym:
             yt_list.append(yt)
             yt_to_sym[yt] = sym
@@ -308,12 +308,73 @@ def load_market_snapshot(view: str = "daily", _bucket: str = "") -> MarketSnapsh
     return snapshot
 
 
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+def _fetch_universe_ohlcv(period: str = "1mo") -> dict[str, pd.DataFrame]:
+    """Batch-download daily OHLCV for the expanded dashboard universe.
+
+    Mirrors the lower-level YahooFetcher batch path but is keyed on the
+    expanded universe (Nifty 50 + Next 50 + Midcap) so dashboard surfaces
+    aren't capped at Nifty 50.
+    """
+    yt_to_sym = {info[0]: sym for sym, info in EXPANDED_UNIVERSE.items()}
+    tickers_str = " ".join(yt_to_sym.keys())
+
+    try:
+        data = yf.download(
+            tickers_str,
+            period=period,
+            interval="1d",
+            group_by="ticker",
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+        )
+    except Exception as e:
+        logger.warning(f"Universe batch fetch failed: {e}")
+        return {}
+
+    if data is None or data.empty:
+        return {}
+
+    out: dict[str, pd.DataFrame] = {}
+    for yt, sym in yt_to_sym.items():
+        try:
+            if isinstance(data.columns, pd.MultiIndex):
+                level_0 = data.columns.get_level_values(0).unique().tolist()
+                level_1 = data.columns.get_level_values(1).unique().tolist()
+                if yt in level_0:
+                    sub = data[yt].copy()
+                elif yt in level_1:
+                    sub = data.xs(yt, level=1, axis=1).copy()
+                else:
+                    continue
+            else:
+                sub = data.copy()
+
+            sub.columns = [str(c).lower() for c in sub.columns]
+            if "close" not in sub.columns:
+                continue
+
+            sub = sub.reset_index()
+            sub.columns = [str(c).lower() for c in sub.columns]
+            sub = sub.dropna(subset=["close"])
+            if sub.empty:
+                continue
+            out[sym] = sub
+        except Exception:
+            continue
+
+    return out
+
+
 def _populate_stock_data(snapshot: MarketSnapshot, period: str, live_quotes: dict | None = None):
-    """Fetch Nifty 50 stock prices and compute movers."""
+    """Fetch expanded-universe stock prices (Nifty 50 + Next 50 + Midcap) and
+    compute movers. The universe is wider than the model-training pipeline's
+    Nifty 50 because dashboard surfaces (top movers, breadth, sector deep-dive)
+    benefit from broader large+midcap coverage."""
     live_quotes = live_quotes or {}
     try:
-        fetcher = YahooFetcher(max_retries=2, retry_delay=1.0)
-        stock_data = fetcher.fetch_recent_ohlcv(period=period)
+        stock_data = _fetch_universe_ohlcv(period=period)
 
         if not stock_data:
             logger.warning("No stock data fetched")
@@ -351,8 +412,9 @@ def _populate_stock_data(snapshot: MarketSnapshot, period: str, live_quotes: dic
 
             volume = int(df[vol_col].iloc[-1]) if vol_col and pd.notna(df[vol_col].iloc[-1]) else 0
 
-            company = NIFTY50_STOCKS.get(symbol, (None, symbol, "Unknown"))[1]
-            sector = NIFTY50_STOCKS.get(symbol, (None, None, "Unknown"))[2]
+            meta = EXPANDED_UNIVERSE.get(symbol, (None, symbol, "Unknown"))
+            company = meta[1]
+            sector = meta[2]
 
             records.append({
                 "symbol": symbol,
@@ -711,13 +773,8 @@ def _fetch_market_caps(_day_bucket: str = "") -> dict[str, float]:
     """
     del _day_bucket
     from concurrent.futures import ThreadPoolExecutor
-    from config.midcap_tickers import MIDCAP_STOCKS
 
-    universe: dict[str, str] = {}
-    for sym, (yt, _, _) in NIFTY50_STOCKS.items():
-        universe[sym] = yt
-    for sym, (yt, _, _) in MIDCAP_STOCKS.items():
-        universe.setdefault(sym, yt)
+    universe: dict[str, str] = {sym: info[0] for sym, info in EXPANDED_UNIVERSE.items()}
 
     def _one(item):
         sym, tkr = item
@@ -746,115 +803,23 @@ def _fetch_market_caps(_day_bucket: str = "") -> dict[str, float]:
     return out
 
 
-@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="Building market heatmap...")
-def _load_midcap_changes(_bucket: str = "") -> pd.DataFrame:
-    """Fetch Midcap-only OHLCV and compute DoD/WoW. Cached on the same minute
-    bucket as the main snapshot so the two stay in lockstep."""
-    from config.midcap_tickers import MIDCAP_STOCKS
-
-    live_quotes = _fetch_live_quotes_cached(_bucket=_bucket)
-
-    mc_map = {sym: yt for sym, (yt, _, _) in MIDCAP_STOCKS.items()}
-    if not mc_map:
-        return pd.DataFrame()
-
-    try:
-        data = yf.download(
-            " ".join(mc_map.values()),
-            period="1mo",
-            interval="1d",
-            group_by="ticker",
-            auto_adjust=True,
-            progress=False,
-            threads=True,
-        )
-    except Exception as e:
-        logger.warning(f"Midcap batch fetch failed: {e}")
-        return pd.DataFrame()
-
-    if data is None or data.empty:
-        return pd.DataFrame()
-
-    rows = []
-    for sym, (yt, name, sec) in MIDCAP_STOCKS.items():
-        try:
-            if isinstance(data.columns, pd.MultiIndex):
-                level_0 = data.columns.get_level_values(0).unique().tolist()
-                level_1 = data.columns.get_level_values(1).unique().tolist()
-                if yt in level_0:
-                    sub = data[yt].copy()
-                elif yt in level_1:
-                    sub = data.xs(yt, level=1, axis=1).copy()
-                else:
-                    continue
-            else:
-                sub = data.copy()
-
-            sub.columns = [str(c).lower() for c in sub.columns]
-            if "close" not in sub.columns:
-                continue
-
-            sub = sub.reset_index()
-            sub.columns = [str(c).lower() for c in sub.columns]
-
-            closes = sub["close"].dropna()
-            if len(closes) < 2:
-                continue
-
-            latest, prev, _ = _apply_live_quote(closes, live_quotes.get(sym))
-            dod = ((latest - prev) / prev) * 100 if prev else 0.0
-
-            date_col = "date" if "date" in sub.columns else None
-            dates_for_close = sub.loc[closes.index, date_col] if date_col else None
-            _, anchor_close, _ = _week_pct_change_full(closes, dates_for_close)
-            wow = ((latest - anchor_close) / anchor_close) * 100 if anchor_close else 0.0
-
-            vol = int(sub["volume"].iloc[-1]) if "volume" in sub.columns and pd.notna(sub["volume"].iloc[-1]) else 0
-
-            rows.append({
-                "symbol": sym,
-                "company": name,
-                "sector": sec or "Other",
-                "close": round(latest, 2),
-                "dod_pct": round(dod, 2),
-                "wow_pct": round(wow, 2),
-                "volume": vol,
-            })
-        except Exception:
-            continue
-
-    return pd.DataFrame(rows)
-
-
 def load_heatmap_data(view: str = "daily", snapshot: "MarketSnapshot | None" = None) -> pd.DataFrame:
-    """Return a DataFrame for the heatmap: Nifty 50 + Midcap.
+    """Return a DataFrame for the heatmap: full expanded universe (Nifty 50 +
+    Next 50 + Midcap).
 
-    Nifty 50 numbers come straight from `snapshot.stock_changes` (exactly what
-    every other component sees) so DoD/WoW match the rest of the dashboard.
-    Midcaps are loaded via a separate cached fetcher that honours the same
-    minute-bucket cache key.
+    All numbers come straight from `snapshot.stock_changes` — which now spans
+    the expanded universe — so DoD/WoW match the rest of the dashboard exactly.
 
     Columns: symbol, company, sector, close, dod_pct, wow_pct, volume,
     market_cap, size.
     """
     del view  # only used for display; computation covers both DoD + WoW
-    from config.midcap_tickers import MIDCAP_STOCKS
 
-    nifty_df: pd.DataFrame
-    if snapshot is not None and not snapshot.stock_changes.empty:
-        cols = ["symbol", "company", "sector", "close", "dod_pct", "wow_pct", "volume"]
-        nifty_df = snapshot.stock_changes[cols].copy()
-    else:
-        nifty_df = pd.DataFrame()
-
-    midcap_df = _load_midcap_changes(_bucket=_market_minute_bucket())
-
-    if nifty_df.empty and midcap_df.empty:
+    if snapshot is None or snapshot.stock_changes.empty:
         return pd.DataFrame()
 
-    df = pd.concat([nifty_df, midcap_df], ignore_index=True)
-    # If a midcap symbol overlaps with Nifty 50 (post-rebalance), keep snapshot row.
-    df = df.drop_duplicates(subset=["symbol"], keep="first")
+    cols = ["symbol", "company", "sector", "close", "dod_pct", "wow_pct", "volume"]
+    df = snapshot.stock_changes[cols].copy()
     df["sector"] = df["sector"].fillna("Other")
 
     today = date.today()

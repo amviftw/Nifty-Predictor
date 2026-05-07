@@ -205,7 +205,7 @@ def _render_breadth_chip(snapshot: MarketSnapshot):
             headline=headline,
             left_label="Up", left_value=f"{adv_pct:.0f}%", left_color="#00d09c",
             right_label="Down", right_value=f"{dec_pct:.0f}%", right_color="#eb5757",
-            caption=f"of {total} Nifty 50 stocks" if total else "",
+            caption=f"of {total} largecap+midcap stocks" if total else "",
         ),
         unsafe_allow_html=True,
     )
