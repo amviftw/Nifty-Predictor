@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from config.nifty50_tickers import NIFTY50_STOCKS
 from config.midcap_tickers import MIDCAP_STOCKS
+from config.largecap_extra_tickers import LARGECAP_NEXT50_STOCKS
 from dashboard.analyst_data import AnalystSnapshot, load_analyst_snapshot
 from dashboard.config import (
     ANALYST_CACHE_TTL_SECONDS,
@@ -33,6 +34,7 @@ from dashboard.config import (
 # Universe → stock dict
 _UNIVERSE_MAP = {
     "Nifty 50": NIFTY50_STOCKS,
+    "Largecap+": LARGECAP_NEXT50_STOCKS,
     "Midcap": MIDCAP_STOCKS,
 }
 
@@ -73,9 +75,17 @@ HORIZON_COLORS = {
 # ---------------------------------------------------------------------------
 
 def _universe_stocks(universe: str) -> dict:
-    """Return the combined stock dict for the selected universe label."""
+    """Return the combined stock dict for the selected universe label.
+
+    "Both" spans Nifty 50 + Nifty Next 50 + Midcap so it stays consistent
+    with the rest of the dashboard's expanded universe — otherwise names
+    classified as Nifty Next 50 (DMART, HAL, BEL, ...) would silently
+    disappear from this view.
+    """
     if universe == "Both":
         merged = dict(NIFTY50_STOCKS)
+        for sym, meta in LARGECAP_NEXT50_STOCKS.items():
+            merged.setdefault(sym, meta)
         for sym, meta in MIDCAP_STOCKS.items():
             merged.setdefault(sym, meta)
         return merged
@@ -457,7 +467,7 @@ def render_target_hunter():
     chip_cols = st.columns([1.2, 1.4, 1.4, 1.4, 0.8])
     with chip_cols[0]:
         universe = _segmented(
-            "Universe", ["Nifty 50", "Midcap", "Both"],
+            "Universe", ["Nifty 50", "Largecap+", "Midcap", "Both"],
             default=st.session_state.get("th_universe", "Nifty 50"),
             key="th_universe",
         ) or "Nifty 50"
@@ -554,7 +564,16 @@ def render_target_hunter():
 
         meta = stocks_meta.get(symbol, (None, symbol, "Unknown"))
         company, sector = meta[1], meta[2]
-        uni_label = t.get("universe") or ("Midcap" if symbol in MIDCAP_STOCKS and symbol not in NIFTY50_STOCKS else "Nifty 50")
+        if t.get("universe"):
+            uni_label = t["universe"]
+        elif symbol in NIFTY50_STOCKS:
+            uni_label = "Nifty 50"
+        elif symbol in LARGECAP_NEXT50_STOCKS:
+            uni_label = "Largecap+"
+        elif symbol in MIDCAP_STOCKS:
+            uni_label = "Midcap"
+        else:
+            uni_label = "Nifty 50"
 
         row = {
             "Symbol": symbol,

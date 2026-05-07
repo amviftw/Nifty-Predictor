@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.nifty50_tickers import NIFTY50_STOCKS
 from config.midcap_tickers import MIDCAP_STOCKS
+from config.largecap_extra_tickers import LARGECAP_NEXT50_STOCKS
 from dashboard.config import (
     ANALYST_CACHE_TTL_SECONDS,
     TARGET_REVISION_WINDOW_DAYS,
@@ -30,7 +31,7 @@ from dashboard.config import (
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-Universe = Literal["Nifty 50", "Midcap", "Both"]
+Universe = Literal["Nifty 50", "Largecap+", "Midcap", "Both"]
 
 # yfinance Ticker.info keys we care about
 _INFO_KEYS = (
@@ -162,14 +163,23 @@ def _fetch_ath(ticker: yf.Ticker) -> dict:
 def _universe_items(universe: Universe) -> list[tuple[str, tuple[str, str, str], str]]:
     """Return [(symbol, (ticker, company, sector), universe_label)]."""
     items: list[tuple[str, tuple[str, str, str], str]] = []
+    seen: set[str] = set()
     if universe in ("Nifty 50", "Both"):
         for sym, meta in NIFTY50_STOCKS.items():
             items.append((sym, meta, "Nifty 50"))
+            seen.add(sym)
+    if universe in ("Largecap+", "Both"):
+        for sym, meta in LARGECAP_NEXT50_STOCKS.items():
+            if sym in seen:
+                continue
+            items.append((sym, meta, "Largecap+"))
+            seen.add(sym)
     if universe in ("Midcap", "Both"):
         for sym, meta in MIDCAP_STOCKS.items():
-            if universe == "Both" and sym in NIFTY50_STOCKS:
+            if sym in seen:
                 continue
             items.append((sym, meta, "Midcap"))
+            seen.add(sym)
     return items
 
 

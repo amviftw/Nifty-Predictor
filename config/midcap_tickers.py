@@ -50,7 +50,6 @@ MIDCAP_STOCKS = {
     "IDFCFIRSTB": ("IDFCFIRSTB.NS", "IDFC First Bank", "Banking"),
     "IGL": ("IGL.NS", "Indraprastha Gas", "Oil & Gas"),
     "INDIANB": ("INDIANB.NS", "Indian Bank", "Banking"),
-    "INDUSINDBK": ("INDUSINDBK.NS", "IndusInd Bank", "Banking"),
     "IOB": ("IOB.NS", "Indian Overseas Bank", "Banking"),
     "IPCALAB": ("IPCALAB.NS", "IPCA Laboratories", "Pharma"),
     "JSL": ("JSL.NS", "Jindal Stainless", "Metals"),
