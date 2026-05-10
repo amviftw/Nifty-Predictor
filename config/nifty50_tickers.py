@@ -100,15 +100,26 @@ GLOBAL_INDICES = {
     "USDINR": "INR=X",
 }
 
-# Sector indices for relative strength computation
+# Sector and thematic indices for relative strength computation and dashboard charts.
+# Yahoo Finance does not expose every NSE index. Where the raw index is not
+# available, use the closest liquid ETF proxy and keep that explicit here.
 SECTOR_INDICES = {
-    "IT": "^CNXIT",
-    "Banking": "^NSEBANK",
-    "Pharma": "^CNXPHARMA",
     "Auto": "^CNXAUTO",
-    "FMCG": "^CNXFMCG",
-    "Metals": "^CNXMETAL",
-    "Infrastructure": "^CNXINFRA",
-    "Oil & Gas": "^CNXENERGY",
+    "Banking": "^NSEBANK",
+    "Chemicals": "NIFTY_CHEMICALS.NS",
+    "Consumer Durables": "NIFTY_CONSR_DURBL.NS",
+    "Energy": "^CNXENERGY",
     "Financial Services": "^CNXFIN",
+    "FMCG": "^CNXFMCG",
+    "Healthcare": "NIFTY_HEALTHCARE.NS",
+    "Infrastructure": "^CNXINFRA",
+    "IT": "^CNXIT",
+    "Media": "^CNXMEDIA",
+    "Metals": "^CNXMETAL",
+    "Oil & Gas": "NIFTY_OIL_AND_GAS.NS",
+    "Pharma": "^CNXPHARMA",
+    "Private Bank": "NIFTY_PVT_BANK.NS",
+    "PSU Bank": "^CNXPSUBANK",
+    "Realty": "^CNXREALTY",
+    "India Defence": "MODEFENCE.NS",
 }

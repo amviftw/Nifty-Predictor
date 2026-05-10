@@ -3,37 +3,52 @@ Dashboard-specific configuration constants.
 Sectoral index tickers, supply chain tickers, sector-commodity mappings, and layout settings.
 """
 
-# Sectoral index tickers for Yahoo Finance
-# Extends config/nifty50_tickers.py SECTOR_INDICES with additional indices
+from config.nifty50_tickers import SECTOR_INDICES
+
+# Sectoral/thematic index tickers for Yahoo Finance.
+# Keep this display-name layer in sync with the canonical symbols in
+# config.nifty50_tickers.SECTOR_INDICES.
 SECTORAL_INDICES = {
-    "Nifty Bank": "^NSEBANK",
-    "Nifty IT": "^CNXIT",
-    "Nifty Pharma": "^CNXPHARMA",
-    "Nifty Auto": "^CNXAUTO",
-    "Nifty FMCG": "^CNXFMCG",
-    "Nifty Metal": "^CNXMETAL",
-    "Nifty Infra": "^CNXINFRA",
-    "Nifty Energy": "^CNXENERGY",
-    "Nifty Fin Svc": "^CNXFIN",
-    "Nifty Realty": "^CNXREALTY",
-    "Nifty PSU Bank": "^CNXPSUBANK",
-    "Nifty Media": "^CNXMEDIA",
+    "Nifty Auto": SECTOR_INDICES["Auto"],
+    "Nifty Bank": SECTOR_INDICES["Banking"],
+    "Nifty Chemicals": SECTOR_INDICES["Chemicals"],
+    "Nifty Consumer Durables": SECTOR_INDICES["Consumer Durables"],
+    "Nifty Energy": SECTOR_INDICES["Energy"],
+    "Nifty Financial Services": SECTOR_INDICES["Financial Services"],
+    "Nifty FMCG": SECTOR_INDICES["FMCG"],
+    "Nifty Healthcare": SECTOR_INDICES["Healthcare"],
+    "Nifty Infra": SECTOR_INDICES["Infrastructure"],
+    "Nifty IT": SECTOR_INDICES["IT"],
+    "Nifty Media": SECTOR_INDICES["Media"],
+    "Nifty Metal": SECTOR_INDICES["Metals"],
+    "Nifty Oil & Gas": SECTOR_INDICES["Oil & Gas"],
+    "Nifty Pharma": SECTOR_INDICES["Pharma"],
+    "Nifty Private Bank": SECTOR_INDICES["Private Bank"],
+    "Nifty PSU Bank": SECTOR_INDICES["PSU Bank"],
+    "Nifty Realty": SECTOR_INDICES["Realty"],
+    "Nifty India Defence": SECTOR_INDICES["India Defence"],
 }
 
 # Maps dashboard sectoral index names back to sector names used in NIFTY50_STOCKS
 SECTOR_INDEX_TO_SECTOR = {
-    "Nifty Bank": "Banking",
-    "Nifty IT": "IT",
-    "Nifty Pharma": "Pharma",
     "Nifty Auto": "Auto",
-    "Nifty FMCG": "FMCG",
-    "Nifty Metal": "Metals",
-    "Nifty Infra": "Infrastructure",
+    "Nifty Bank": "Banking",
+    "Nifty Chemicals": "Chemicals",
+    "Nifty Consumer Durables": "Consumer Goods",
     "Nifty Energy": "Oil & Gas",
-    "Nifty Fin Svc": "Financial Services",
-    "Nifty Realty": "Realty",
-    "Nifty PSU Bank": "Banking",
+    "Nifty Financial Services": "Financial Services",
+    "Nifty FMCG": "FMCG",
+    "Nifty Healthcare": "Healthcare",
+    "Nifty Infra": "Infrastructure",
+    "Nifty IT": "IT",
     "Nifty Media": "Media",
+    "Nifty Metal": "Metals",
+    "Nifty Oil & Gas": "Oil & Gas",
+    "Nifty Pharma": "Pharma",
+    "Nifty Private Bank": "Banking",
+    "Nifty PSU Bank": "Banking",
+    "Nifty Realty": "Realty",
+    "Nifty India Defence": "Defence",
 }
 
 # Supply chain / international factor tickers
@@ -101,6 +116,18 @@ SECTOR_SUPPLY_CHAIN = {
     "Cement": {
         "factors": ["Crude Oil (WTI)"],
         "note": "Energy-intensive industry; fuel and logistics costs tied to crude",
+    },
+    "Chemicals": {
+        "factors": ["Crude Oil (WTI)", "Natural Gas", "US Dollar Index"],
+        "note": "Feedstock, energy costs, exports, and China+1 supply chain shifts drive margins",
+    },
+    "Healthcare": {
+        "factors": ["US Dollar Index"],
+        "note": "Export-heavy earnings are sensitive to USD/INR and global regulatory events",
+    },
+    "Defence": {
+        "factors": ["Copper", "US Dollar Index"],
+        "note": "Order inflows, electronics inputs, import substitution, and rupee moves affect defence manufacturers",
     },
 }
 
