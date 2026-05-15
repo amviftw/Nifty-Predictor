@@ -2,9 +2,11 @@
 
 import streamlit as st
 import pandas as pd
+from loguru import logger
 
-from dashboard.data_loader import MarketSnapshot
+from dashboard.data_loader import MarketSnapshot, _market_minute_bucket
 from dashboard.config import SECTOR_INDEX_TO_SECTOR
+from dashboard.sector_signals import compute_sector_signals
 
 
 def render_key_metrics(snapshot: MarketSnapshot):
@@ -225,7 +227,14 @@ def render_sectoral_heatmap(snapshot: MarketSnapshot):
 
     # Per-sector stock-level stats
     sector_stats = _compute_sector_stats(snapshot)
-    signals = snapshot.sector_signals or {}
+
+    # Compute S/R + bias overlay lazily here rather than during snapshot
+    # construction. `_fetch_sector_history` is already called from
+    # `render_sector_deep_dive` in the same tab, so by the time the user
+    # sees the chips this is a cache hit; doing it inside
+    # `load_market_snapshot` made the whole page block on a 2y × 18-sector
+    # fetch even when the user was on a different tab.
+    signals = _compute_sector_signals_cached()
 
     change_label = "Day" if snapshot.view == "daily" else "Week"
     st.markdown(
@@ -344,6 +353,26 @@ def _compute_sector_stats(snapshot: MarketSnapshot) -> dict:
             "top_change": top[change_col],
         }
     return result
+
+
+def _compute_sector_signals_cached() -> dict[str, dict]:
+    """Return `{sector_index: signal_dict}` using the shared 2y close cache.
+
+    Wrapped here (not at the data-loader layer) so the cost is only paid on
+    the Sectors tab. Failures degrade gracefully — the chips just lose the
+    S/R overlay rather than blanking out.
+    """
+    # Local import keeps `dashboard.components.sector_deep_dive` out of the
+    # module-load import cycle.
+    from dashboard.components.sector_deep_dive import _fetch_sector_history
+
+    try:
+        histories = _fetch_sector_history(_bucket=_market_minute_bucket())
+    except Exception as e:
+        logger.warning(f"sector signals: history fetch failed: {e}")
+        return {}
+    signals = compute_sector_signals(histories)
+    return {k: v.as_dict() for k, v in signals.items()}
 
 
 def _bias_style(bias: str) -> tuple[str, str]:

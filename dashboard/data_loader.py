@@ -7,7 +7,6 @@ All functions use @st.cache_data for smart caching.
 
 import sys
 import os
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
@@ -37,7 +36,6 @@ from dashboard.config import (
     PERIOD_WEEKLY,
 )
 from dashboard.disk_cache import disk_cached
-from dashboard.sector_signals import compute_sector_signals, SectorSignal
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -75,10 +73,6 @@ class MarketSnapshot:
 
     # Sectoral indices DataFrame: columns=[close, dod_pct, wow_pct, mom_pct]
     sectoral_data: pd.DataFrame = field(default_factory=pd.DataFrame)
-
-    # Per-sector support / resistance / RSI / next-session bias overlay.
-    # Keyed by sector display name (matches `sectoral_data["Index"]`).
-    sector_signals: dict = field(default_factory=dict)
 
     # Stock-level data
     stock_changes: pd.DataFrame = field(default_factory=pd.DataFrame)
@@ -306,55 +300,18 @@ def load_market_snapshot(view: str = "daily", _bucket: str = "") -> MarketSnapsh
     # even when Yahoo's daily candle hasn't rolled forward yet.
     live_quotes = _fetch_live_quotes_cached(_bucket=_bucket)
 
-    # Fan out the four independent fetches concurrently. Each one wraps a
-    # set of yfinance / NSE calls that are pure I/O, so a small worker pool
-    # cuts wall-clock from "sum of all" to ~"max of all" without thrashing
-    # Yahoo's rate limits. Exceptions are surfaced once below so a slow
-    # single source doesn't quietly drop the rest.
-    populators = [
-        ("stock", lambda: _populate_stock_data(snapshot, period, live_quotes)),
-        ("macro", lambda: _populate_macro_data(snapshot, period, live_quotes)),
-        ("sectoral", lambda: _populate_sectoral_data(snapshot, period)),
-        ("supply_chain", lambda: _populate_supply_chain(snapshot, period)),
-    ]
-    with ThreadPoolExecutor(max_workers=len(populators)) as ex:
-        futures = {ex.submit(fn): label for label, fn in populators}
-        for fut in futures:
-            label = futures[fut]
-            try:
-                fut.result()
-            except Exception as e:
-                logger.error(f"{label} populate failed: {e}")
-
-    # Sector S/R + next-session bias overlay (cheap math on top of the
-    # already-cached daily-close histories).
-    _populate_sector_signals(snapshot)
+    # Fetch sequentially. An earlier revision fanned these out across a
+    # ThreadPoolExecutor, but every populate already calls
+    # `yf.download(..., threads=True)` which spawns yfinance's own thread
+    # pool. Stacking an outer pool on top of that pushes Yahoo into rate-
+    # limiting territory — paradoxically slowing the page down on warm
+    # caches and timing out on cold ones. Keep it boring.
+    _populate_stock_data(snapshot, period, live_quotes)
+    _populate_macro_data(snapshot, period, live_quotes)
+    _populate_sectoral_data(snapshot, period)
+    _populate_supply_chain(snapshot, period)
 
     return snapshot
-
-
-def _populate_sector_signals(snapshot: MarketSnapshot):
-    """Attach support/resistance + directional bias to each sector row.
-
-    Lives at the end of the snapshot build so it can read `sectoral_data`
-    and pair every row with a signal derived from the cached 2y daily-close
-    history. Sectors without enough history (or where the fetch failed) are
-    silently dropped — callers must treat missing entries as "no overlay".
-    """
-    if snapshot.sectoral_data.empty:
-        return
-    # Local import keeps `dashboard.components.*` out of the import cycle
-    # at module load time.
-    from dashboard.components.sector_deep_dive import _fetch_sector_history
-
-    try:
-        histories = _fetch_sector_history(_bucket=_market_minute_bucket())
-    except Exception as e:
-        logger.warning(f"sector history unavailable for signals: {e}")
-        return
-
-    signals = compute_sector_signals(histories)
-    snapshot.sector_signals = {k: v.as_dict() for k, v in signals.items()}
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
