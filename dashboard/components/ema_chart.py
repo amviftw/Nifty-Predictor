@@ -19,6 +19,7 @@ from loguru import logger
 
 from dashboard.config import CACHE_TTL_SECONDS
 from dashboard.data_loader import _market_minute_bucket
+from dashboard.disk_cache import disk_cached
 
 
 # Colour palette — matches the Groww-style dashboard CSS in app.py.
@@ -49,11 +50,17 @@ _TIMEFRAMES: dict[str, int | None] = {
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+@disk_cached(name="nifty_history", ttl_hours=6)
 def _fetch_nifty_history(period: str = "max", _bucket: str = "") -> pd.DataFrame:
     """Fetch Nifty 50 daily close history. Cached on the minute bucket.
 
     We fetch a long history (`max` by default) so a 200-day SMA is well
     defined even on the shortest timeframes. Slicing happens on display.
+
+    The disk-cache layer (6h TTL) survives Streamlit server restarts, so a
+    cold-loaded dashboard no longer pays the ~3s Yahoo round-trip for two
+    decades of Nifty closes — only the deltas matter intraday and they're
+    already plumbed through the live-quote overlay elsewhere.
     """
     del _bucket
     try:

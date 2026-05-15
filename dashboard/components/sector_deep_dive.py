@@ -12,9 +12,11 @@ from dashboard.config import (
     SECTOR_SUPPLY_CHAIN,
     CACHE_TTL_SECONDS,
 )
+from dashboard.disk_cache import disk_cached
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+@disk_cached(name="sector_history_2y", ttl_hours=6)
 def _fetch_sector_history(_bucket: str = "") -> dict:
     """Fetch ~2y of daily closes for every sectoral index in one batch.
 

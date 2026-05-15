@@ -15,6 +15,7 @@ from loguru import logger
 
 from dashboard.config import SECTORAL_INDICES, CACHE_TTL_SECONDS
 from dashboard.data_loader import _market_minute_bucket
+from dashboard.disk_cache import disk_cached
 
 NUM_WEEKS = 16
 RECENT_WINDOW = 5
@@ -31,6 +32,7 @@ BORDER = "#232834"
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+@disk_cached(name="sector_weekly_1y", ttl_hours=4)
 def _fetch_sector_weekly(_bucket: str = "") -> pd.DataFrame:
     """Fetch ~1 year of weekly pct changes for all sectoral indices.
 

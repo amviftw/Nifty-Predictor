@@ -7,6 +7,7 @@ All functions use @st.cache_data for smart caching.
 
 import sys
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
@@ -35,6 +36,8 @@ from dashboard.config import (
     PERIOD_DAILY,
     PERIOD_WEEKLY,
 )
+from dashboard.disk_cache import disk_cached
+from dashboard.sector_signals import compute_sector_signals, SectorSignal
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -72,6 +75,10 @@ class MarketSnapshot:
 
     # Sectoral indices DataFrame: columns=[close, dod_pct, wow_pct, mom_pct]
     sectoral_data: pd.DataFrame = field(default_factory=pd.DataFrame)
+
+    # Per-sector support / resistance / RSI / next-session bias overlay.
+    # Keyed by sector display name (matches `sectoral_data["Index"]`).
+    sector_signals: dict = field(default_factory=dict)
 
     # Stock-level data
     stock_changes: pd.DataFrame = field(default_factory=pd.DataFrame)
@@ -299,13 +306,123 @@ def load_market_snapshot(view: str = "daily", _bucket: str = "") -> MarketSnapsh
     # even when Yahoo's daily candle hasn't rolled forward yet.
     live_quotes = _fetch_live_quotes_cached(_bucket=_bucket)
 
-    # Fetch all data sources (sequentially to avoid rate-limiting)
-    _populate_stock_data(snapshot, period, live_quotes)
-    _populate_macro_data(snapshot, period, live_quotes)
-    _populate_sectoral_data(snapshot, period)
-    _populate_supply_chain(snapshot, period)
+    # Fan out the four independent fetches concurrently. Each one wraps a
+    # set of yfinance / NSE calls that are pure I/O, so a small worker pool
+    # cuts wall-clock from "sum of all" to ~"max of all" without thrashing
+    # Yahoo's rate limits. Exceptions are surfaced once below so a slow
+    # single source doesn't quietly drop the rest.
+    populators = [
+        ("stock", lambda: _populate_stock_data(snapshot, period, live_quotes)),
+        ("macro", lambda: _populate_macro_data(snapshot, period, live_quotes)),
+        ("sectoral", lambda: _populate_sectoral_data(snapshot, period)),
+        ("supply_chain", lambda: _populate_supply_chain(snapshot, period)),
+    ]
+    with ThreadPoolExecutor(max_workers=len(populators)) as ex:
+        futures = {ex.submit(fn): label for label, fn in populators}
+        for fut in futures:
+            label = futures[fut]
+            try:
+                fut.result()
+            except Exception as e:
+                logger.error(f"{label} populate failed: {e}")
+
+    # Sector S/R + next-session bias overlay (cheap math on top of the
+    # already-cached daily-close histories).
+    _populate_sector_signals(snapshot)
 
     return snapshot
+
+
+def _populate_sector_signals(snapshot: MarketSnapshot):
+    """Attach support/resistance + directional bias to each sector row.
+
+    Lives at the end of the snapshot build so it can read `sectoral_data`
+    and pair every row with a signal derived from the cached 2y daily-close
+    history. Sectors without enough history (or where the fetch failed) are
+    silently dropped — callers must treat missing entries as "no overlay".
+    """
+    if snapshot.sectoral_data.empty:
+        return
+    # Local import keeps `dashboard.components.*` out of the import cycle
+    # at module load time.
+    from dashboard.components.sector_deep_dive import _fetch_sector_history
+
+    try:
+        histories = _fetch_sector_history(_bucket=_market_minute_bucket())
+    except Exception as e:
+        logger.warning(f"sector history unavailable for signals: {e}")
+        return
+
+    signals = compute_sector_signals(histories)
+    snapshot.sector_signals = {k: v.as_dict() for k, v in signals.items()}
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+def _fetch_macro_batch_cached(_bucket: str = "") -> dict[str, pd.Series]:
+    """Single batched download for every macro/index ticker.
+
+    Replaces the previous 9-call sequential storm (Nifty, VIX, USD/INR,
+    S&P 500, NASDAQ, Dow, FTSE, Nikkei, Hang Seng — each its own yfinance
+    request). One batched call collapses that to roughly one HTTP round
+    trip, which is the single biggest contributor to dashboard cold-start
+    latency.
+
+    Returns `{ticker: close_series}` keyed by Yahoo ticker. Tickers that
+    yfinance silently drops on the batch (rare for indices, but possible)
+    fall back to a one-off `_fetch_single_ticker` so the dashboard never
+    loses a headline KPI to a flaky batch response.
+    """
+    del _bucket
+    tickers = ["^NSEI", "^INDIAVIX", "INR=X"]
+    for key in ("SP500", "NASDAQ", "DOW", "FTSE", "NIKKEI", "HANGSENG"):
+        t = GLOBAL_INDICES.get(key)
+        if t:
+            tickers.append(t)
+
+    out: dict[str, pd.Series] = {}
+    try:
+        data = yf.download(
+            " ".join(tickers),
+            period="1mo",
+            interval="1d",
+            group_by="ticker",
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+        )
+    except Exception as e:
+        logger.warning(f"macro batch fetch failed: {e}")
+        data = pd.DataFrame()
+
+    if not data.empty:
+        for tkr in tickers:
+            try:
+                if isinstance(data.columns, pd.MultiIndex):
+                    level_0 = data.columns.get_level_values(0).unique().tolist()
+                    level_1 = data.columns.get_level_values(1).unique().tolist()
+                    if tkr in level_0:
+                        close = data[tkr]["Close"]
+                    elif tkr in level_1:
+                        sub = data.xs(tkr, level=1, axis=1)
+                        close = sub["Close"] if "Close" in sub.columns else sub.iloc[:, 0]
+                    else:
+                        continue
+                else:
+                    close = data["Close"]
+                close = close.dropna()
+                if len(close) >= 2:
+                    out[tkr] = close
+            except Exception:
+                continue
+
+    # Per-ticker fallback for anything the batch dropped
+    for tkr in tickers:
+        if tkr not in out:
+            series = _fetch_single_ticker(tkr, "1mo")
+            if len(series) >= 2:
+                out[tkr] = series
+
+    return out
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
@@ -453,33 +570,33 @@ def _populate_stock_data(snapshot: MarketSnapshot, period: str, live_quotes: dic
 def _populate_macro_data(snapshot: MarketSnapshot, period: str, live_quotes: dict | None = None):
     """Fetch global indices, VIX, USD/INR, FII/DII.
 
-    Critical KPIs (Nifty 50, VIX, USD/INR) are fetched individually for
-    reliability — yfinance batch downloads silently drop Indian indices.
-    Global indices (S&P, NASDAQ, etc.) still use the batch fetcher.
+    All index closes are pulled from a single batched yfinance call
+    (`_fetch_macro_batch_cached`) rather than the historical pattern of
+    one yfinance request per ticker. The per-ticker fallback inside the
+    batch helper still kicks in if Yahoo silently drops an Indian index
+    on a given batch, so headline KPIs degrade gracefully rather than
+    going blank.
     """
     live_quotes = live_quotes or {}
-    # --- Critical KPIs: individual fetches ---
-    _fetch_nifty50(snapshot, period, live_quotes.get("^NSEI"))
-    _fetch_india_vix(snapshot, period, live_quotes.get("^INDIAVIX"))
-    _fetch_usdinr(snapshot, period, live_quotes.get("INR=X"))
+    closes_by_ticker = _fetch_macro_batch_cached(_bucket=_market_minute_bucket())
 
-    # --- Global indices: fetch individually for reliable price + DoD + WoW + sparkline.
-    # Batch yfinance calls silently drop some international indices, and we need
-    # rich per-index data (close, DoD %, WoW %, last-N-day sparkline).
+    _apply_nifty50(snapshot, closes_by_ticker.get("^NSEI"), live_quotes.get("^NSEI"))
+    _apply_india_vix(snapshot, closes_by_ticker.get("^INDIAVIX"), live_quotes.get("^INDIAVIX"))
+    _apply_usdinr(snapshot, closes_by_ticker.get("INR=X"), live_quotes.get("INR=X"))
+
+    # --- Global indices ---
     from dashboard.config import GLOBAL_INDEX_DISPLAY
-    from config.nifty50_tickers import GLOBAL_INDICES
     for key, display_name in GLOBAL_INDEX_DISPLAY.items():
         ticker = GLOBAL_INDICES.get(key)
         if not ticker:
             continue
-        closes = _fetch_single_ticker(ticker, period)
-        if len(closes) < 2:
+        closes = closes_by_ticker.get(ticker)
+        if closes is None or len(closes) < 2:
             continue
         latest = float(closes.iloc[-1])
         prev = float(closes.iloc[-2])
         dod_pct = ((latest - prev) / prev) * 100 if prev else 0.0
         wow_pct = _week_pct_change(closes)
-        # Trailing series for sparkline (last ~10 points)
         spark = closes.tail(10).reset_index(drop=True).tolist()
         snapshot.global_indices[display_name] = {
             "close": round(latest, 2),
@@ -564,10 +681,13 @@ def _fetch_single_ticker(ticker: str, period: str) -> pd.Series:
         return pd.Series(dtype=float)
 
 
-def _fetch_nifty50(snapshot: MarketSnapshot, period: str, live_quote: dict | None = None):
-    """Fetch Nifty 50 index close and compute day/week changes."""
-    closes = _fetch_single_ticker("^NSEI", period)
-    if len(closes) < 2:
+def _apply_nifty50(
+    snapshot: MarketSnapshot,
+    closes: pd.Series | None,
+    live_quote: dict | None = None,
+):
+    """Set Nifty 50 fields on the snapshot from pre-fetched close history."""
+    if closes is None or len(closes) < 2:
         return
 
     latest, prev, _ = _apply_live_quote(closes, live_quote)
@@ -580,10 +700,13 @@ def _fetch_nifty50(snapshot: MarketSnapshot, period: str, live_quote: dict | Non
     snapshot.nifty50_wow_anchor_date = anchor_date
 
 
-def _fetch_india_vix(snapshot: MarketSnapshot, period: str, live_quote: dict | None = None):
-    """Fetch India VIX."""
-    closes = _fetch_single_ticker("^INDIAVIX", period)
-    if len(closes) < 2:
+def _apply_india_vix(
+    snapshot: MarketSnapshot,
+    closes: pd.Series | None,
+    live_quote: dict | None = None,
+):
+    """Set India VIX fields on the snapshot from pre-fetched close history."""
+    if closes is None or len(closes) < 2:
         return
 
     latest, prev, _ = _apply_live_quote(closes, live_quote)
@@ -601,10 +724,13 @@ def _fetch_india_vix(snapshot: MarketSnapshot, period: str, live_quote: dict | N
     snapshot.vix_series = pd.DataFrame(vix_data).set_index("date") if vix_data else pd.DataFrame()
 
 
-def _fetch_usdinr(snapshot: MarketSnapshot, period: str, live_quote: dict | None = None):
-    """Fetch USD/INR exchange rate."""
-    closes = _fetch_single_ticker("INR=X", period)
-    if len(closes) < 2:
+def _apply_usdinr(
+    snapshot: MarketSnapshot,
+    closes: pd.Series | None,
+    live_quote: dict | None = None,
+):
+    """Set USD/INR fields on the snapshot from pre-fetched close history."""
+    if closes is None or len(closes) < 2:
         return
 
     latest, prev, _ = _apply_live_quote(closes, live_quote)
@@ -764,15 +890,18 @@ def _populate_supply_chain(snapshot: MarketSnapshot, period: str):
 # ---------------------------------------------------------------------------
 
 @st.cache_data(ttl=86400, show_spinner=False)
+@disk_cached(name="market_caps", ttl_hours=24)
 def _fetch_market_caps(_day_bucket: str = "") -> dict[str, float]:
-    """Fetch market caps for the heatmap universe. Cached for 24h.
+    """Fetch market caps for the heatmap universe. Cached for 24h on both
+    the in-process Streamlit cache and a pickle-on-disk cache so the value
+    survives server restarts (cold start of the dashboard is otherwise
+    dominated by 250+ `fast_info` round-trips for sizing the heatmap tiles).
 
     Market cap is structurally stable intraday — refreshing daily is plenty.
     `fast_info` is preferred (orders of magnitude faster than `.info`); we
     fall back to `.info` only when fast_info doesn't surface a cap.
     """
     del _day_bucket
-    from concurrent.futures import ThreadPoolExecutor
 
     universe: dict[str, str] = {sym: info[0] for sym, info in EXPANDED_UNIVERSE.items()}
 

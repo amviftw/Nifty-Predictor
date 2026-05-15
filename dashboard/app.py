@@ -25,6 +25,7 @@ from dashboard.components.sector_momentum import render_sector_momentum
 from dashboard.components.sector_monthly_returns import render_sector_monthly_returns
 from dashboard.components.scenario_lab import render_scenario_lab
 from dashboard.components.heatmap import render_heatmap
+from dashboard.components.stock_view import render_stock_view
 
 
 _CUSTOM_CSS = """
@@ -377,7 +378,7 @@ def main():
 
     # --- Toggles (top of page, pill-style) ---
     toggle_left, toggle_mid, toggle_right = st.columns([3, 2, 1])
-    mode_options = ["Market Overview", "Target Hunter", "Scenario Lab"]
+    mode_options = ["Market Overview", "Stock View", "Target Hunter", "Scenario Lab"]
     view_options = ["Daily", "Weekly"]
 
     with toggle_left:
@@ -419,6 +420,14 @@ def main():
         snapshot = load_market_snapshot(view="daily", _bucket=_market_minute_bucket())
         render_header(snapshot)
         render_target_hunter()
+        return
+
+    # --- Stock View mode ---
+    if mode == "Stock View":
+        # No snapshot or sector fan-out needed — the stock view is its own
+        # standalone surface; pulling the full market snapshot would add
+        # seconds of latency to a flow the user might use for a quick lookup.
+        render_stock_view()
         return
 
     # --- Scenario Lab mode ---

@@ -225,6 +225,7 @@ def render_sectoral_heatmap(snapshot: MarketSnapshot):
 
     # Per-sector stock-level stats
     sector_stats = _compute_sector_stats(snapshot)
+    signals = snapshot.sector_signals or {}
 
     change_label = "Day" if snapshot.view == "daily" else "Week"
     st.markdown(
@@ -232,7 +233,9 @@ def render_sectoral_heatmap(snapshot: MarketSnapshot):
         f'Sorted by {change_label} change &middot; '
         f'Green = positive momentum &middot; '
         f'<span style="color:#00d09c;">&#9650;</span> advancing / '
-        f'<span style="color:#eb5757;">&#9660;</span> declining stocks in sector</div>',
+        f'<span style="color:#eb5757;">&#9660;</span> declining stocks in sector &middot; '
+        f'<b>S/R</b> = 20-day support/resistance, <b>Bias</b> = next-session lean '
+        f'(RSI + EMA-21 + S/R proximity)</div>',
         unsafe_allow_html=True,
     )
 
@@ -279,6 +282,9 @@ def render_sectoral_heatmap(snapshot: MarketSnapshot):
                 f'</div>'
             )
 
+        # Support / resistance + next-session bias overlay
+        sr_html = _sector_sr_html(close, signals.get(idx_name))
+
         # Momentum verdict
         verdict = _sector_verdict(change, wow, mom)
         verdict_html = ""
@@ -290,7 +296,7 @@ def render_sectoral_heatmap(snapshot: MarketSnapshot):
 
         chip = (
             f'<div style="background:{bg};border:1px solid {border};border-radius:12px;'
-            f'padding:14px 16px;min-width:210px;flex:1 1 210px;max-width:280px;">'
+            f'padding:14px 16px;min-width:230px;flex:1 1 230px;max-width:300px;">'
             f'<div style="display:flex;justify-content:space-between;align-items:center;">'
             f'<span style="font-weight:700;font-size:0.88rem;color:#e8ecf1;">{idx_name}</span>'
             f'<span style="color:{chg_color};font-weight:600;font-size:0.88rem;">{change:+.1f}%</span>'
@@ -305,7 +311,7 @@ def render_sectoral_heatmap(snapshot: MarketSnapshot):
             f'letter-spacing:0.04em;">Month</span>'
             f'<br><span style="color:{mom_color};font-weight:500;">{mom:+.1f}%</span></div>'
             f'</div>'
-            f'{ad_html}{verdict_html}'
+            f'{ad_html}{sr_html}{verdict_html}'
             f'</div>'
         )
         chips.append(chip)
@@ -338,6 +344,65 @@ def _compute_sector_stats(snapshot: MarketSnapshot) -> dict:
             "top_change": top[change_col],
         }
     return result
+
+
+def _bias_style(bias: str) -> tuple[str, str]:
+    """Color + glyph for a directional bias label."""
+    if bias == "Bullish":
+        return "#00d09c", "▲"
+    if bias == "Bearish":
+        return "#eb5757", "▼"
+    return "#c9cfd9", "→"
+
+
+def _sector_sr_html(close: float, signal: dict | None) -> str:
+    """Compact Support / Resistance / Bias mini-block for a sector chip.
+
+    Returns "" when no signal is available so the chip still renders for
+    sectors with insufficient history.
+    """
+    if not signal:
+        return ""
+
+    support = signal.get("support") or 0.0
+    resistance = signal.get("resistance") or 0.0
+    bias = signal.get("bias") or "Neutral"
+    rsi = signal.get("rsi") or 0.0
+    bias_color, bias_glyph = _bias_style(bias)
+
+    # Position-in-range bar: how far close is between S and R (0-100%)
+    if resistance > support:
+        pos_pct = max(0.0, min(100.0, (close - support) / (resistance - support) * 100))
+    else:
+        pos_pct = 50.0
+
+    proximity_note = ""
+    if signal.get("near_resistance"):
+        proximity_note = " &middot; <span style=\"color:#eb5757;\">at R</span>"
+    elif signal.get("near_support"):
+        proximity_note = " &middot; <span style=\"color:#00d09c;\">at S</span>"
+
+    rationale = signal.get("rationale", "") or ""
+
+    return (
+        f'<div style="margin-top:8px;padding-top:7px;border-top:1px solid #232834;'
+        f'font-size:0.66rem;color:#7a8294;line-height:1.4;" title="{rationale}">'
+        # S/R values row
+        f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+        f'<span><span style="color:#00d09c;font-weight:600;">S</span> {support:,.0f}'
+        f' &middot; <span style="color:#eb5757;font-weight:600;">R</span> {resistance:,.0f}</span>'
+        f'<span style="color:{bias_color};font-weight:600;">{bias_glyph} {bias}</span>'
+        f'</div>'
+        # Position-in-range bar
+        f'<div style="margin-top:5px;height:4px;background:rgba(255,255,255,0.06);'
+        f'border-radius:2px;position:relative;">'
+        f'<div style="position:absolute;left:{pos_pct:.0f}%;top:-3px;width:2px;height:10px;'
+        f'background:#e8ecf1;border-radius:1px;transform:translateX(-1px);"></div>'
+        f'</div>'
+        f'<div style="margin-top:5px;font-size:0.62rem;color:#6b7587;">'
+        f'RSI {rsi:.0f}{proximity_note}</div>'
+        f'</div>'
+    )
 
 
 def _sector_verdict(day_chg, wow, mom):
