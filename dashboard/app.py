@@ -12,7 +12,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
 
-from dashboard.data_loader import load_market_snapshot, _market_minute_bucket
+from dashboard.data_loader import (
+    load_market_snapshot,
+    _market_minute_bucket,
+    attach_sectoral_data,
+    attach_supply_chain_data,
+)
 from dashboard.components.header import render_header
 from dashboard.components.market_overview import render_key_metrics, render_sectoral_heatmap
 from dashboard.components.top_movers import render_top_movers
@@ -460,6 +465,7 @@ def main():
         render_heatmap(view=view_key, snapshot=snapshot)
 
     with tab_sectors:
+        attach_sectoral_data(snapshot)
         render_sectoral_heatmap(snapshot)
         _spacer()
         render_sector_monthly_returns()
@@ -469,6 +475,10 @@ def main():
         render_sector_deep_dive(snapshot)
 
     with tab_macro:
+        # render_supply_chain also reads snapshot.sectoral_data for the
+        # cross-reference table, so both lazy loaders fire when this tab opens.
+        attach_sectoral_data(snapshot)
+        attach_supply_chain_data(snapshot)
         render_macro_panel(snapshot)
         _spacer()
         render_global_indices(snapshot)

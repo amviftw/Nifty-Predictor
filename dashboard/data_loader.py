@@ -7,6 +7,7 @@ All functions use @st.cache_data for smart caching.
 
 import sys
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
@@ -36,6 +37,11 @@ from dashboard.config import (
     PERIOD_WEEKLY,
 )
 from dashboard.disk_cache import disk_cached
+from dashboard.precomputed_cache import (
+    load_fii_dii as _load_precomputed_fii_dii,
+    load_market_caps as _load_precomputed_market_caps,
+    merge_today_into_fii_dii,
+)
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -300,18 +306,67 @@ def load_market_snapshot(view: str = "daily", _bucket: str = "") -> MarketSnapsh
     # even when Yahoo's daily candle hasn't rolled forward yet.
     live_quotes = _fetch_live_quotes_cached(_bucket=_bucket)
 
-    # Fetch sequentially. An earlier revision fanned these out across a
-    # ThreadPoolExecutor, but every populate already calls
-    # `yf.download(..., threads=True)` which spawns yfinance's own thread
-    # pool. Stacking an outer pool on top of that pushes Yahoo into rate-
-    # limiting territory — paradoxically slowing the page down on warm
-    # caches and timing out on cold ones. Keep it boring.
-    _populate_stock_data(snapshot, period, live_quotes)
-    _populate_macro_data(snapshot, period, live_quotes)
-    _populate_sectoral_data(snapshot, period)
-    _populate_supply_chain(snapshot, period)
+    # Critical path: universe (top movers, breadth, heatmap) + macro (key
+    # metrics chips, FII/DII). Both are independent network calls; run them
+    # in parallel. yfinance's internal threads=True is left on inside each
+    # batch — the two outer threads are a tiny multiplier compared with the
+    # per-ticker fan-out yfinance already does, and in testing Yahoo did not
+    # rate-limit at this concurrency.
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_stocks = ex.submit(_populate_stock_data, snapshot, period, live_quotes)
+        f_macro = ex.submit(_populate_macro_data, snapshot, period, live_quotes)
+        f_stocks.result()
+        f_macro.result()
 
+    # Sectoral and supply chain are NOT loaded here — they're only needed by
+    # the Sectors and Macro & Global tabs. Lazy-loading them via
+    # `attach_sectoral_data` / `attach_supply_chain_data` in app.py shaves
+    # ~1s off Market Overview cold start.
     return snapshot
+
+
+def attach_sectoral_data(snapshot: MarketSnapshot, period: str = "1mo") -> MarketSnapshot:
+    """Lazy-load sectoral indices and attach onto an existing snapshot.
+
+    Called from app.py only when the user opens a tab that actually renders
+    sectoral data (Sectors tab, plus the cross-sector callouts inside the
+    Macro & Global tab). Cached per minute-bucket so repeated tab opens are
+    free.
+    """
+    if not snapshot.sectoral_data.empty:
+        return snapshot
+    df = _fetch_sectoral_data_cached(_bucket=_market_minute_bucket(), period=period)
+    if df is not None and not df.empty:
+        snapshot.sectoral_data = df
+    return snapshot
+
+
+def attach_supply_chain_data(snapshot: MarketSnapshot, period: str = "1mo") -> MarketSnapshot:
+    """Lazy-load supply chain / commodity factors. See attach_sectoral_data."""
+    if not snapshot.supply_chain.empty:
+        return snapshot
+    df = _fetch_supply_chain_cached(_bucket=_market_minute_bucket(), period=period)
+    if df is not None and not df.empty:
+        snapshot.supply_chain = df
+    return snapshot
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+def _fetch_sectoral_data_cached(_bucket: str = "", period: str = "1mo") -> pd.DataFrame:
+    """Cached wrapper around the existing sectoral populate logic."""
+    del _bucket
+    sink = MarketSnapshot(timestamp=datetime.now(IST), view="daily")
+    _populate_sectoral_data(sink, period)
+    return sink.sectoral_data
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+def _fetch_supply_chain_cached(_bucket: str = "", period: str = "1mo") -> pd.DataFrame:
+    """Cached wrapper around the existing supply chain populate logic."""
+    del _bucket
+    sink = MarketSnapshot(timestamp=datetime.now(IST), view="daily")
+    _populate_supply_chain(sink, period)
+    return sink.supply_chain
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
@@ -562,18 +617,66 @@ def _populate_macro_data(snapshot: MarketSnapshot, period: str, live_quotes: dic
             "spark": [float(v) for v in spark],
         }
 
-    # --- FII/DII --- fetch ~30 days so we can compute WoW and MoM aggregates.
+    # --- FII/DII --- need ~30 days for WoW and MoM aggregates.
+    # Fast path: nightly GitHub Action precomputes the full 30-day window and
+    # commits it to storage/precomputed/fii_dii.parquet. At runtime we read
+    # that file and only fetch today's record live (1 nselib call instead of
+    # the 30-day loop). Slow path: parquet missing or too stale → full live
+    # fetch, same as before.
+    fii_dii = _load_fii_dii_with_today()
+    if fii_dii:
+        snapshot.fii_dii_series = fii_dii
+        latest_fii = fii_dii[-1]
+        snapshot.fii_net_buy = latest_fii.get("fii_net_buy", 0.0)
+        snapshot.dii_net_buy = latest_fii.get("dii_net_buy", 0.0)
+        _populate_flow_week_aggregates(snapshot, fii_dii)
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+def _load_fii_dii_with_today() -> list[dict]:
+    """Read the precomputed FII/DII baseline and fold in today's print.
+
+    On cold start in production this costs ~50ms (parquet read) + at most one
+    nselib round-trip for the current day. The old path made up to 30 nselib
+    calls with retry sleeps, accounting for 2–5s of dashboard latency.
+    """
+    precomputed = _load_precomputed_fii_dii(max_age_days=3)
+    today = date.today()
+    today_record: dict | None = None
+
+    if not is_trading_day(today):
+        # No new print expected — return the baseline as-is.
+        return precomputed or _live_fii_dii_fallback()
+
     try:
         nf = NSEFetcher(max_retries=2, retry_delay=1.0)
-        fii_dii = nf.fetch_recent_fii_dii(lookback_days=30)
-        if fii_dii:
-            snapshot.fii_dii_series = fii_dii
-            latest_fii = fii_dii[-1]
-            snapshot.fii_net_buy = latest_fii.get("fii_net_buy", 0.0)
-            snapshot.dii_net_buy = latest_fii.get("dii_net_buy", 0.0)
-            _populate_flow_week_aggregates(snapshot, fii_dii)
+        today_only = nf.fetch_fii_dii(today.isoformat(), today.isoformat())
+        if today_only:
+            today_record = today_only[-1]
     except Exception as e:
-        logger.warning(f"FII/DII fetch failed: {e}")
+        logger.debug(f"Today's FII/DII fetch failed (using baseline only): {e}")
+
+    if precomputed:
+        return merge_today_into_fii_dii(precomputed, today_record)
+
+    # Cold fallback: no parquet on disk yet (first deploy / CI hasn't run)
+    fallback = _live_fii_dii_fallback()
+    if today_record and not any(
+        (r.get("date") or "")[:10] == (today_record.get("date") or "")[:10]
+        for r in fallback
+    ):
+        fallback = merge_today_into_fii_dii(fallback, today_record)
+    return fallback
+
+
+def _live_fii_dii_fallback() -> list[dict]:
+    """Last-resort 30-day live fetch when the precomputed baseline is missing."""
+    try:
+        nf = NSEFetcher(max_retries=2, retry_delay=1.0)
+        return nf.fetch_recent_fii_dii(lookback_days=30) or []
+    except Exception as e:
+        logger.warning(f"FII/DII live fallback failed: {e}")
+        return []
 
 
 def _populate_flow_week_aggregates(snapshot: MarketSnapshot, fii_dii: list[dict]):
@@ -857,8 +960,16 @@ def _fetch_market_caps(_day_bucket: str = "") -> dict[str, float]:
     Market cap is structurally stable intraday — refreshing daily is plenty.
     `fast_info` is preferred (orders of magnitude faster than `.info`); we
     fall back to `.info` only when fast_info doesn't surface a cap.
+
+    Fast path: the nightly GitHub Action commits a parquet of market caps to
+    `storage/precomputed/market_caps.parquet`. If present and fresh we use it
+    directly and skip the 250-ticker `fast_info` sweep entirely.
     """
     del _day_bucket
+
+    precomputed = _load_precomputed_market_caps(max_age_days=7)
+    if precomputed:
+        return precomputed
 
     universe: dict[str, str] = {sym: info[0] for sym, info in EXPANDED_UNIVERSE.items()}
 

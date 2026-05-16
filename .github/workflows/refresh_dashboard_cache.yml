@@ -1,0 +1,40 @@
+name: Refresh dashboard cache
+
+# Runs after NSE close (15:30 IST = 10:00 UTC) on weekdays, then commits the
+# refreshed parquet files. The dashboard's runtime path reads these instead of
+# fanning out 30+ nselib calls and 250+ yfinance fast_info calls per page load.
+on:
+  schedule:
+    - cron: '30 11 * * 1-5'    # 17:00 IST, Mon–Fri (after NSE settle)
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyarrow
+
+      - name: Refresh dashboard cache
+        run: python -m scripts.refresh_dashboard_cache
+
+      - name: Commit refreshed parquet files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add storage/precomputed/ || true
+          git diff --staged --quiet || git commit -m "chore: refresh dashboard cache $(date -u +%Y-%m-%d)"
+          git push
